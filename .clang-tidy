@@ -1,0 +1,35 @@
+#
+# .clang-tidy - static analysis configuration for the factory firmware (DNFR-004)
+#
+# Only the project's own code (src layers, board, tests) is reported on;
+# generated flatcc headers, STM32Cube and FreeRTOS are still parsed but never
+# flagged.
+#
+# Run with:  make lint         (report findings)
+#            make lint-strict  (fail on any finding)
+#
+
+Checks: >
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-use-nullptr,
+  performance-*,
+  portability-*,
+  -bugprone-reserved-identifier,
+  -clang-diagnostic-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -bugprone-easily-swappable-parameters,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-macro-to-enum,
+  -misc-header-include-cycle,
+  -misc-include-cleaner,
+  -performance-no-int-to-ptr,
+  -cppcoreguidelines-pro-type-member-init,
+  -misc-no-recursion,
+  -performance-weak-try-catch
+
+# Restrict findings to the project's own sources and headers.
+HeaderFilterRegex: '(^|/)(src/(app|bsp|platform|services|protocol|tasks)|board|tests)/.*\.(c|h|s)$'
+FormatStyle: none

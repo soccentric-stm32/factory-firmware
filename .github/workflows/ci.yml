@@ -1,0 +1,50 @@
+# GitHub Actions CI
+#
+# The full release pipeline runs in Jenkins (see Jenkinsfile). This workflow
+# keeps the fast checks available on every push and pull request, and offers
+# a manual cross-build for forks that do not have the stm32-dev image yet.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run the command-handler tests
+        run: make test
+
+  firmware:
+    name: Cross build (manual)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the stm32-dev image
+        run: docker build --tag stm32-dev:latest docker
+      - name: Build the firmware
+        run: make build
+      - name: Run clang-tidy
+        run: make lint
+      - name: Upload firmware artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-firmware
+          path: |
+            build/factory.elf
+            build/factory.bin
+            build/factory.hex
+            build/factory.map
+            build/factory.img
+          if-no-files-found: error
