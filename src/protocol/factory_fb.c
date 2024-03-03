@@ -27,6 +27,12 @@
 #define FB_MAX_FIELDS      16U
 #define FB_RAW_SIZE        (FACTORY_MAX_CHUNK + 32U)
 
+/* One builder arena serves every reply helper: factory_fb_handle() runs to
+ * completion inside the comms task, so two builders are never live at the
+ * same time.  A per-function arena would multiply this buffer by seven and
+ * blow the RAM budget. */
+static uint8_t fb_arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
+
 /* hwlink Error values used by this module (protocol/hwlink.fbs). */
 #define FB_ERR_NONE          0U
 #define FB_ERR_MALFORMED     1U
@@ -462,9 +468,8 @@ static bool fbr_vector(const fbr_t *r, const uint8_t *table, uint8_t field,
 
 static size_t fb_ack(uint8_t *reply, size_t capacity, uint16_t seq, uint16_t body_type)
 {
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     fbt_t t;
     fbt_start(&t, &b, 2);
     fbt_u16(&t, 0U, seq);
@@ -476,9 +481,8 @@ static size_t fb_ack(uint8_t *reply, size_t capacity, uint16_t seq, uint16_t bod
 static size_t fb_nak(uint8_t *reply, size_t capacity, uint16_t seq,
                      uint16_t error, const char *detail)
 {
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     size_t text = fbb_string(&b, detail != NULL ? detail : "");
     fbt_t t;
     fbt_start(&t, &b, 4);
@@ -515,10 +519,9 @@ static uint16_t map_error(uint8_t status)
 static size_t fb_hello_reply(const factory_ops_t *ops, uint8_t *reply,
                              size_t capacity, uint16_t seq)
 {
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     uint8_t uid[12];
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     ops->chip_uid(uid);
     uint64_t uid64 = (uint64_t)rd_u32(uid) | ((uint64_t)rd_u32(&uid[4]) << 32U);
     size_t name = fbb_string(&b, ops->name);
@@ -574,9 +577,8 @@ static size_t handle_get_info(const factory_ops_t *ops, uint8_t *reply,
 
     uint8_t uid[12];
     ops->chip_uid(uid);
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     size_t s_name = fbb_string(&b, name);
     size_t s_ver = fbb_string(&b, version);
     size_t s_build = fbb_string(&b, build);
@@ -617,9 +619,8 @@ static size_t handle_read(const factory_ops_t *ops, const fbr_t *r,
         return fb_nak(reply, capacity, seq, status, "read failed");
     }
 
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     size_t data = fbb_bytes(&b, &raw_reply[2], length);
     fbt_t t;
     fbt_start(&t, &b, 2);
@@ -686,9 +687,8 @@ static size_t handle_write_data(const factory_ops_t *ops, const fbr_t *r,
 static size_t fb_write_result(uint8_t *reply, size_t capacity, bool success,
                               uint32_t crc, uint16_t error, const char *detail)
 {
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     size_t text = fbb_string(&b, detail != NULL ? detail : "");
     fbt_t t;
     fbt_start(&t, &b, 4);
@@ -751,9 +751,8 @@ static size_t handle_selftest(const factory_ops_t *ops, uint8_t *reply,
         return fb_nak(reply, capacity, seq, FB_ERR_MALFORMED, "self-test truncated");
     }
 
-    static uint8_t arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
     fbb_t b;
-    fbb_init(&b, arena, sizeof(arena));
+    fbb_init(&b, fb_arena, sizeof(fb_arena));
     size_t items[16];
     if (count > 16U) {
         count = 16U;

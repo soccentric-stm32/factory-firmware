@@ -432,6 +432,9 @@ static void handle_set_led_all(const hwlink_SetLedAll_table_t set, uint16_t seq)
     (void)send_ack(seq);
 }
 
+static void handle_factory_fb(uint16_t seq, const uint8_t *payload,
+                              size_t payload_len);
+
 static void handle_payload(uint16_t seq, const uint8_t *payload, size_t len)
 {
     if (hwlink_Message_verify_as_root(payload, len) != flatcc_verify_ok) {
