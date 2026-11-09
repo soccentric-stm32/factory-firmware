@@ -1,0 +1,5 @@
+build/
+tests/host/test_factory
+tests/host/libfactory_sim.so
+*.pem
+!keys/dev-signing-key.pem
