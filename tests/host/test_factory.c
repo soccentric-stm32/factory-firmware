@@ -12,6 +12,7 @@
 
 void sim_reset(void);
 void sim_fail_next_write(void);
+void sim_set_hardware(uint32_t, uint32_t, uint32_t, uint32_t);
 size_t sim_handle(const uint8_t *, size_t, uint8_t *, size_t);
 
 static int failures;
@@ -87,6 +88,58 @@ static uint8_t write_file(uint32_t address, const uint8_t *file, size_t total,
     return send(req, 1);
 }
 
+/* Result of check `id` in the last SELFTEST reply, or 0xFF when absent. */
+static uint8_t check_result(uint8_t id)
+{
+    for (size_t at = 3; at + 6 <= 3 + (size_t)rpl[2] * 6; at += 6) {
+        if (rpl[at] == id) {
+            return rpl[at + 1];
+        }
+    }
+    return 0xFF;
+}
+
+static void test_selftest(void)
+{
+    uint8_t req[] = { FACTORY_CMD_SELFTEST };
+    uint8_t begin[11] = { FACTORY_CMD_WRITE_BEGIN, 0, 0x50, 0x10, 0x08, 32, 0, 0, 0, 0, 0 };
+
+    sim_reset();
+    CHECK(send(req, 1) == FACTORY_OK);
+    CHECK(rpl[0] == (FACTORY_CMD_SELFTEST | 0x80));
+    CHECK(rpl[2] == FACTORY_CHECK_COUNT);
+    for (uint8_t id = 1; id <= FACTORY_CHECK_COUNT; id++) {
+        CHECK(check_result(id) == FACTORY_CHECK_PASS);
+    }
+    /* The CRC known-answer value is reported. */
+    for (size_t at = 3; at + 6 <= 3 + (size_t)rpl[2] * 6; at += 6) {
+        if (rpl[at] == FACTORY_CHECK_CRC) {
+            CHECK(rpl[at + 2] == 0x26 && rpl[at + 3] == 0x39 &&
+                  rpl[at + 4] == 0xF4 && rpl[at + 5] == 0xCB);
+        }
+    }
+
+    sim_set_hardware(0x10006450UL, 1024UL, 168000000UL, 0x2FFFAAE4UL);
+    CHECK(send(req, 1) == FACTORY_OK);
+    CHECK(check_result(FACTORY_CHECK_DEVICE_ID) == FACTORY_CHECK_FAIL);
+    CHECK(check_result(FACTORY_CHECK_FLASH_SIZE) == FACTORY_CHECK_FAIL);
+    CHECK(check_result(FACTORY_CHECK_CLOCK) == FACTORY_CHECK_FAIL);
+    CHECK(check_result(FACTORY_CHECK_OPTION) == FACTORY_CHECK_FAIL);
+    CHECK(check_result(FACTORY_CHECK_RAM) == FACTORY_CHECK_PASS);
+
+    /* RDP level 2 is reported as a failure even when the bank mode is right. */
+    sim_set_hardware(0x10006451UL, 2048UL, 216000000UL, 0x0FFFCCE4UL);
+    CHECK(send(req, 1) == FACTORY_OK);
+    CHECK(check_result(FACTORY_CHECK_OPTION) == FACTORY_CHECK_FAIL);
+
+    /* Refused while a write is in progress (the RAM test needs the buffer). */
+    sim_reset();
+    CHECK(send(begin, 11) == FACTORY_OK);
+    CHECK(send(req, 1) == FACTORY_ERR_SEQUENCE);
+    factory_reset_session();
+    CHECK(send(req, 1) == FACTORY_OK);
+}
+
 int main(void)
 {
     uint8_t file[512];
@@ -154,6 +207,8 @@ int main(void)
     CHECK(send(unknown, 1) == FACTORY_ERR_BAD_COMMAND);
     uint8_t rd_bad[7] = { FACTORY_CMD_READ, 0, 0x00, 0x00, 0x00, 4, 0 };
     CHECK(send(rd_bad, 7) == FACTORY_ERR_BAD_RANGE);
+
+    test_selftest();
 
     if (failures == 0) {
         printf("factory: all tests passed\n");

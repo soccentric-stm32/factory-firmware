@@ -128,6 +128,24 @@ Payload: `cmd u8`, then arguments. Replies echo `cmd | 0x80` and a
 | 0x04 | `WRITE_DATA`  | `offset u16`, bytes (max 512)            | none                               |
 | 0x05 | `WRITE_END`   | none                                     | `crc u32` of what was programmed   |
 | 0x06 | `DIAG_INIT`   | `address u32`                            | none                               |
+| 0x07 | `SELFTEST`    | none                                     | `count u8`, then `count` checks    |
+
+### 5.1 `SELFTEST`
+
+Runs the basic peripheral checks and reports each as 6 bytes:
+`id u8`, `result u8` (0 pass, 1 fail, 2 skipped), `value u32` (the number the
+check measured). It writes nothing to flash. It is refused with `SEQUENCE`
+while a write is in progress, because the RAM test borrows the write buffer.
+
+| Id | Check          | Passes when                                              | `value`            |
+| -- | -------------- | -------------------------------------------------------- | ------------------ |
+| 1  | `DEVICE_ID`    | `DBGMCU_IDCODE` DEV_ID is `0x451`                        | the IDCODE         |
+| 2  | `FLASH_SIZE`   | the flash size register reads 2048 KB                    | size in KB         |
+| 3  | `CLOCK`        | the system clock is 216 MHz                              | Hz                 |
+| 4  | `RAM`          | a walking-bit and address pattern test of 4 KB of SRAM   | bytes tested       |
+| 5  | `CRC`          | CRC-32 of `123456789` is `0xCBF43926`                    | the computed CRC   |
+| 6  | `FLASH_READ`   | the identity sector reads back                           | 0                  |
+| 7  | `OPTION_BYTES` | nDBANK is 0 (dual-bank) and RDP is not level 2           | `FLASH_OPTCR`      |
 
 Status codes: 0 OK, 1 BAD_COMMAND, 2 BAD_RANGE, 3 BAD_HEADER, 4 BAD_CRC,
 5 BAD_UID, 6 FLASH_ERROR, 7 SEQUENCE.

@@ -97,6 +97,26 @@ static uint32_t store_crc32(const void *data, size_t len)
     return app_crc32(data, len);
 }
 
+static uint32_t store_device_id(void)
+{
+    return DBGMCU->IDCODE;
+}
+
+static uint32_t store_flash_size_kb(void)
+{
+    return (uint32_t)(*(const volatile uint16_t *)FLASHSIZE_BASE);
+}
+
+static uint32_t store_core_clock_hz(void)
+{
+    return HAL_RCC_GetSysClockFreq();
+}
+
+static uint32_t store_option_bytes(void)
+{
+    return FLASH->OPTCR;
+}
+
 static const factory_ops_t ops = {
     .flash_read = store_read,
     .flash_write_block = store_write_block,
@@ -105,6 +125,10 @@ static const factory_ops_t ops = {
     .name = APP_FIRMWARE_NAME,
     .version = APP_VERSION_STR,
     .build = APP_BUILD_DATE,
+    .device_id = store_device_id,
+    .flash_size_kb = store_flash_size_kb,
+    .core_clock_hz = store_core_clock_hz,
+    .option_bytes = store_option_bytes,
 };
 
 const factory_ops_t *factory_store_ops(void)

@@ -265,6 +265,121 @@ static size_t handle_diag_init(const factory_ops_t *ops, const uint8_t *req,
     return program_block(ops, FACTORY_CMD_DIAG_INIT, reply);
 }
 
+/*
+ * SELFTEST: run the basic peripheral checks and report each one as
+ * id u8, result u8, value u32.  The RAM test borrows the write staging
+ * buffer, so it is refused while a write is in progress.
+ */
+static bool ram_walk(volatile uint8_t *buf, size_t len)
+{
+    static const uint8_t patterns[] = { 0x00U, 0xFFU, 0x55U, 0xAAU };
+
+    for (size_t p = 0U; p < sizeof(patterns); p++) {
+        for (size_t i = 0U; i < len; i++) {
+            buf[i] = patterns[p];
+        }
+        for (size_t i = 0U; i < len; i++) {
+            if (buf[i] != patterns[p]) {
+                return false;
+            }
+        }
+    }
+    for (size_t bit = 0U; bit < 8U; bit++) {
+        uint8_t walk = (uint8_t)(1U << bit);
+        for (size_t i = 0U; i < len; i++) {
+            buf[i] = walk;
+        }
+        for (size_t i = 0U; i < len; i++) {
+            if (buf[i] != walk) {
+                return false;
+            }
+        }
+    }
+    for (size_t i = 0U; i < len; i++) {
+        buf[i] = (uint8_t)(i ^ (i >> 8U));
+    }
+    for (size_t i = 0U; i < len; i++) {
+        if (buf[i] != (uint8_t)(i ^ (i >> 8U))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static size_t put_check(uint8_t *out, size_t at, uint8_t id, uint8_t result, uint32_t value)
+{
+    out[at] = id;
+    out[at + 1U] = result;
+    put_u32(&out[at + 2U], value);
+    return at + 6U;
+}
+
+static size_t handle_selftest(const factory_ops_t *ops, uint8_t *reply, size_t capacity)
+{
+    static const uint8_t known[] = { '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+    const size_t need = 3U + (size_t)FACTORY_CHECK_COUNT * 6U;
+    uint8_t probe[32];
+    uint32_t value;
+    size_t n;
+
+    if (session.active) {
+        return reply_status(FACTORY_CMD_SELFTEST, FACTORY_ERR_SEQUENCE, reply);
+    }
+    if (capacity < need) {
+        return reply_status(FACTORY_CMD_SELFTEST, FACTORY_ERR_BAD_RANGE, reply);
+    }
+    n = reply_status(FACTORY_CMD_SELFTEST, FACTORY_OK, reply);
+    reply[n++] = (uint8_t)FACTORY_CHECK_COUNT;
+
+    if (ops->device_id == NULL) {
+        n = put_check(reply, n, FACTORY_CHECK_DEVICE_ID, FACTORY_CHECK_SKIP, 0U);
+    } else {
+        value = ops->device_id();
+        n = put_check(reply, n, FACTORY_CHECK_DEVICE_ID,
+                      (value & 0xFFFU) == FACTORY_DEVICE_ID ? FACTORY_CHECK_PASS : FACTORY_CHECK_FAIL,
+                      value);
+    }
+    if (ops->flash_size_kb == NULL) {
+        n = put_check(reply, n, FACTORY_CHECK_FLASH_SIZE, FACTORY_CHECK_SKIP, 0U);
+    } else {
+        value = ops->flash_size_kb();
+        n = put_check(reply, n, FACTORY_CHECK_FLASH_SIZE,
+                      value == FACTORY_FLASH_SIZE_KB ? FACTORY_CHECK_PASS : FACTORY_CHECK_FAIL,
+                      value);
+    }
+    if (ops->core_clock_hz == NULL) {
+        n = put_check(reply, n, FACTORY_CHECK_CLOCK, FACTORY_CHECK_SKIP, 0U);
+    } else {
+        value = ops->core_clock_hz();
+        n = put_check(reply, n, FACTORY_CHECK_CLOCK,
+                      value == FACTORY_CORE_CLOCK_HZ ? FACTORY_CHECK_PASS : FACTORY_CHECK_FAIL,
+                      value);
+    }
+    n = put_check(reply, n, FACTORY_CHECK_RAM,
+                  ram_walk(session.data, sizeof(session.data)) ? FACTORY_CHECK_PASS
+                                                               : FACTORY_CHECK_FAIL,
+                  (uint32_t)sizeof(session.data));
+    value = ops->crc32(known, sizeof(known));
+    n = put_check(reply, n, FACTORY_CHECK_CRC,
+                  value == 0xCBF43926UL ? FACTORY_CHECK_PASS : FACTORY_CHECK_FAIL, value);
+    n = put_check(reply, n, FACTORY_CHECK_FLASH_READ,
+                  ops->flash_read(FACTORY_READ_BASE, probe, (uint16_t)sizeof(probe))
+                      ? FACTORY_CHECK_PASS
+                      : FACTORY_CHECK_FAIL,
+                  0U);
+    if (ops->option_bytes == NULL) {
+        n = put_check(reply, n, FACTORY_CHECK_OPTION, FACTORY_CHECK_SKIP, 0U);
+    } else {
+        value = ops->option_bytes();
+        /* nDBANK (bit 29) clear is dual-bank; RDP byte 0xCC is level 2. */
+        bool dual_bank = (value & (1UL << 29U)) == 0U;
+        bool rdp_ok = ((value >> 8U) & 0xFFU) != 0xCCU;
+        n = put_check(reply, n, FACTORY_CHECK_OPTION,
+                      (dual_bank && rdp_ok) ? FACTORY_CHECK_PASS : FACTORY_CHECK_FAIL, value);
+    }
+    return n;
+}
+
 size_t factory_handle(const factory_ops_t *ops, const uint8_t *request,
                       size_t request_len, uint8_t *reply, size_t reply_capacity)
 {
@@ -286,6 +401,8 @@ size_t factory_handle(const factory_ops_t *ops, const uint8_t *request,
         return handle_write_end(ops, reply);
     case FACTORY_CMD_DIAG_INIT:
         return handle_diag_init(ops, request, request_len, reply);
+    case FACTORY_CMD_SELFTEST:
+        return handle_selftest(ops, reply, reply_capacity);
     default:
         return reply_status(request[0], FACTORY_ERR_BAD_COMMAND, reply);
     }

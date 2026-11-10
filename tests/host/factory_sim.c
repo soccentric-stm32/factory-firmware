@@ -60,9 +60,20 @@ static void sim_chip_uid(uint8_t uid[12])
     memcpy(uid, sim_uid, 12);
 }
 
+static uint32_t sim_idcode = 0x10006451UL;     /* REV_ID 0x1000, DEV_ID 0x451 */
+static uint32_t sim_flash_kb = 2048UL;
+static uint32_t sim_clock_hz = 216000000UL;
+static uint32_t sim_optcr = 0x0FFFAAE4UL;      /* nDBANK = 0, RDP level 0 */
+
+static uint32_t sim_device_id(void) { return sim_idcode; }
+static uint32_t sim_flash_size_kb(void) { return sim_flash_kb; }
+static uint32_t sim_core_clock_hz(void) { return sim_clock_hz; }
+static uint32_t sim_option_bytes(void) { return sim_optcr; }
+
 static const factory_ops_t ops = {
     sim_read, sim_write_block, sim_chip_uid, crc32_sw,
     "soccentric-factory-firmware", "0.1.0", "host-sim",
+    sim_device_id, sim_flash_size_kb, sim_core_clock_hz, sim_option_bytes,
 };
 
 void sim_reset(void)
@@ -70,6 +81,19 @@ void sim_reset(void)
     memset(flash, 0xFF, sizeof(flash));
     factory_reset_session();
     fail_next_write = 0;
+    sim_idcode = 0x10006451UL;
+    sim_flash_kb = 2048UL;
+    sim_clock_hz = 216000000UL;
+    sim_optcr = 0x0FFFAAE4UL;
+}
+
+/* Change what the simulated hardware readers report (fault injection). */
+void sim_set_hardware(uint32_t idcode, uint32_t flash_kb, uint32_t clock_hz, uint32_t optcr)
+{
+    sim_idcode = idcode;
+    sim_flash_kb = flash_kb;
+    sim_clock_hz = clock_hz;
+    sim_optcr = optcr;
 }
 
 void sim_fail_next_write(void)
