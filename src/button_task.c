@@ -13,6 +13,7 @@
  */
 
 #include "app_log.h"
+#include "task_report.h"
 #include "stm32f7xx_hal.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -81,8 +82,10 @@ static void button_task(void *arg)
     bool pressed = stable;
     bool long_sent = false;
     uint32_t last_checkin = now;
+    task_report_t report = {0U, 0U};
 
     for (;;) {
+        task_report(&report, 2U, "Button", "debounces B1, short press cycles the LED pattern, long press resets it");
         (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(BUTTON_POLL_MS));
         now = xTaskGetTickCount();
         bool raw = button_raw();

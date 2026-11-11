@@ -19,6 +19,7 @@
 #include "app_board.h"
 #include "app_error.h"
 #include "comms_task.h"
+#include "task_report.h"
 #include "health_task.h"
 #include "led_task.h"
 
@@ -333,8 +334,10 @@ static void led_task(void *arg)
     cfg[2].start = now;
     uint32_t error_flags = app_error_flags;
     uint32_t last_checkin = now;
+    task_report_t report = {0U, 0U};
 
     for (;;) {
+        task_report(&report, 1U, "LED", "drives LD1-LD3 patterns, LD3 shows health and fault state");
         now = xTaskGetTickCount();
         error_flags |= app_error_flags;
 

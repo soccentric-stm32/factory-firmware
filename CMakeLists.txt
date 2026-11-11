@@ -153,6 +153,7 @@ set(PROJECT_SOURCES
     src/app_error.c
     src/app_fault.c
     src/app_log.c
+    src/task_report.c
     src/reset_cause.c
     src/iwdg.c
     src/handover.c
