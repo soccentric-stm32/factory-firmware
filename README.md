@@ -15,7 +15,36 @@ It is derived from
 [app-c-freertos](https://github.com/soccentric-stm32/app-c-freertos) and
 keeps its health supervision, watchdog and BOOT handover.
 
-[![The factory firmware (simulator run)](https://raw.githubusercontent.com/soccentric-stm32/soccentric-stm32.github.io/main/assets/shots/term-factory-firmware.webp)](https://soccentric-stm32.github.io/#factory-firmware)
+## Debug terminal
+
+The debug log from a reset on a NUCLEO-F767ZI (USART6, 115200 8N1), recorded from the board. [Watch it replay line by line](https://soccentric-stm32.github.io/#factory-firmware) on the project page.
+
+```console
+$ make flash PORT=/dev/ttyACM0
+Activate: ok, device is resetting
+[      0] BOOT I start v0.1.0 d389f50d03e7, reset 0x14000000
+[      5] BOOT I init: clock 216 MHz, PLL locked
+[      9] BOOT I init: HWLINK on USART3, 115200 8N1
+[     14] BOOT I scan: searching for an application
+[    335] BOOT I init: flash dual bank, writes enabled
+[    339] BOOT I slot A: ok, pending
+[    343] BOOT I slot B: ok, confirmed
+[    346] BOOT I sel: slot A on trial, count 0
+[    350] BOOT I listen: 500 ms for a host
+[    854] BOOT I boot slot A, trial 1
+[      1] C-FRT I start v0.1.0 d501c03a148d, slot A on trial, reset software
+[      1] C-FRT I health: on trial, check in 5000 ms
+[      1] C-FRT I task 3 Health: watches task check-ins, kicks the watchdog, confirms the slot
+[      1] C-FRT I task 4 Comms: answers the factory station: reads and writes the factory data window
+[      1] C-FRT I task 2 Button: debounces B1, short press cycles the LED pattern, long press resets it
+[      1] C-FRT I task 1 LED: drives LD1-LD3 patterns, LD3 shows health and fault state
+[ ... 16 lines omitted: the same task lines, once a second ... ]
+[   5001] C-FRT I health: passed, CONFIRMED written
+[   5001] C-FRT I task 3 Health: watches task check-ins, kicks the watchdog, confirms the slot
+[   5001] C-FRT I task 4 Comms: answers the factory station: reads and writes the factory data window
+[   5001] C-FRT I task 2 Button: debounces B1, short press cycles the LED pattern, long press resets it
+[   5001] C-FRT I task 1 LED: drives LD1-LD3 patterns, LD3 shows health and fault state
+```
 
 ## Highlights
 
