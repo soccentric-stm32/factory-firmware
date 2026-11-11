@@ -2,6 +2,8 @@
 
 The first application a fresh NUCLEO-F767ZI runs after the factory station has flashed the bootloader. It is a FreeRTOS application in C, linked for slot A, that answers the factory station over the ST-LINK virtual COM port. It reports its name and version and writes the per-unit system info, calibration data and diagnostic map into the factory data window of the identity sector. It is derived from [app-c-freertos](https://github.com/soccentric-stm32/app-c-freertos) and keeps its health supervision, watchdog and BOOT handover.
 
+[![The factory firmware (simulator run)](https://raw.githubusercontent.com/soccentric-stm32/soccentric-stm32.github.io/main/assets/shots/term-factory-firmware.webp)](https://soccentric-stm32.github.io/#factory-firmware)
+
 ## Features
 
 - Runs from slot A at `0x0800C000` under the A/B bootloader
