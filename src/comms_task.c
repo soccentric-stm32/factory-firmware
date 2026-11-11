@@ -88,8 +88,8 @@ static size_t rx_enc_len;
 static bool rx_enc_overflow;
 
 static uint8_t rx_raw[HWLINK_MAX_FRAME];
-static uint8_t rx_payload[HWLINK_MAX_FRAME];
-static uint8_t build_payload[HWLINK_MAX_FRAME];
+static uint8_t rx_payload[HWLINK_MAX_FRAME] __attribute__((aligned(8)));
+static uint8_t build_payload[HWLINK_MAX_FRAME] __attribute__((aligned(8)));
 static uint8_t raw_tx[HWLINK_MAX_FRAME];
 
 /* The last reply, kept as an unencoded frame for LNK-008. */
