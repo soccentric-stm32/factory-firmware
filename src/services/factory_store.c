@@ -73,7 +73,7 @@ static bool store_write_block(uint32_t address, const uint8_t *data)
     bool ok = HAL_FLASHEx_Erase(&erase, &sector_error) == HAL_OK;
 
     for (uint32_t i = 0U; ok && i < STORE_SECTOR_SIZE; i += 4U) {
-        uint32_t word;
+        uint32_t word = 0U;
         memcpy(&word, &sector_copy[i], 4U);
         if (word == 0xFFFFFFFFUL) {
             continue;

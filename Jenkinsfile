@@ -70,6 +70,12 @@ pipeline {
             }
         }
 
+        stage('Host tests') {
+            steps {
+                sh 'make test'
+            }
+        }
+
         stage('Static analysis') {
             when { expression { return params.RUN_LINT } }
             steps {
@@ -103,14 +109,14 @@ expected = {
 }
 
 defines = {}
-for line in Path("src/boot_contract.h").read_text(encoding="utf-8").splitlines():
+for line in Path("src/platform/boot_contract.h").read_text(encoding="utf-8").splitlines():
     parts = line.split()
     if len(parts) >= 3 and parts[0] == "#define":
         defines[parts[1]] = parts[2]
 
 for name, want in expected.items():
     if name not in defines:
-        raise SystemExit(f"boot contract: {name} is missing from src/boot_contract.h")
+        raise SystemExit(f"boot contract: {name} is missing from src/platform/boot_contract.h")
     raw = defines[name].rstrip("ULul").rstrip("ULul")
     got = int(raw, 16)
     if got != want:
@@ -157,9 +163,9 @@ PY
         stage('Package') {
             steps {
                 sh '''
-                    python3 ci/package.py --name app-c-freertos --version "$(ci/version.sh)" \\
-                        build/app.elf build/app.bin build/app.hex build/app.map build/factory.img \\
-                        README.md LICENSE
+                    python3 ci/package.py --name factory-firmware --version "$(ci/version.sh)" \\
+                        build/factory.elf build/factory.bin build/factory.hex build/factory.map \\
+                        build/factory.img README.md LICENSE
                 '''
             }
         }

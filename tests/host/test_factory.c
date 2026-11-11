@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../src/factory_proto.h"
+#include "factory_proto.h"
 
 void sim_reset(void);
 void sim_fail_next_write(void);

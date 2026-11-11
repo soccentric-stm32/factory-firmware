@@ -3,7 +3,7 @@
 `hwlink.fbs` is the FlatBuffers schema for the HWLINK protocol
 (SRS-GUI-F767 Appendix A).  It is the single source for the C headers in
 `../src/generated` and should be shared unchanged with BOOT, HWVAL, the GUI
-and the other demo applications.
+and the other applications.
 
 The C headers were generated with flatcc 0.6.1:
 

@@ -76,7 +76,8 @@ static size_t put_string(uint8_t *out, size_t at, size_t capacity, const char *t
         return at;
     }
     out[at++] = (uint8_t)len;
-    memcpy(&out[at], text, len);
+    /* The wire format is length-prefixed, not NUL-terminated. */
+    memcpy(&out[at], text, len); // NOLINT(bugprone-not-null-terminated-result)
     return at + len;
 }
 
@@ -197,10 +198,12 @@ static size_t program_block(const factory_ops_t *ops, uint8_t cmd, uint8_t *repl
     static uint8_t block[FACTORY_BLOCK_SIZE];   /* too big for the task stack */
     uint8_t status = FACTORY_OK;
 
-    if (!ops->flash_write_block(session.address, session.data)) {
-        status = FACTORY_ERR_FLASH;
-    } else if (!ops->flash_read(session.address, block, FACTORY_BLOCK_SIZE) ||
-               memcmp(block, session.data, FACTORY_BLOCK_SIZE) != 0) {
+    bool ok = ops->flash_write_block(session.address, session.data);
+    if (ok) {
+        ok = ops->flash_read(session.address, block, FACTORY_BLOCK_SIZE) &&
+             memcmp(block, session.data, FACTORY_BLOCK_SIZE) == 0;
+    }
+    if (!ok) {
         status = FACTORY_ERR_FLASH;
     }
     if (status != FACTORY_OK) {
@@ -319,8 +322,8 @@ static size_t handle_selftest(const factory_ops_t *ops, uint8_t *reply, size_t c
     static const uint8_t known[] = { '1', '2', '3', '4', '5', '6', '7', '8', '9' };
     const size_t need = 3U + (size_t)FACTORY_CHECK_COUNT * 6U;
     uint8_t probe[32];
-    uint32_t value;
-    size_t n;
+    uint32_t value = 0U;
+    size_t n = 0U;
 
     if (session.active) {
         return reply_status(FACTORY_CMD_SELFTEST, FACTORY_ERR_SEQUENCE, reply);

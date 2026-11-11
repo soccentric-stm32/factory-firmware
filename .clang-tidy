@@ -1,8 +1,9 @@
 #
-# .clang-tidy - static analysis configuration for the FreeRTOS demo application (DNFR-004)
+# .clang-tidy - static analysis configuration for the factory firmware (DNFR-004)
 #
-# Only the project's own code (src, board) is reported on; the
-# STM32Cube and FreeRTOS headers are still parsed but never flagged.
+# Only the project's own code (src layers, board, tests) is reported on;
+# generated flatcc headers, STM32Cube and FreeRTOS are still parsed but never
+# flagged.
 #
 # Run with:  make lint         (report findings)
 #            make lint-strict  (fail on any finding)
@@ -30,5 +31,5 @@ Checks: >
   -performance-weak-try-catch
 
 # Restrict findings to the project's own sources and headers.
-HeaderFilterRegex: '(^|/)(src|board|tests)/[^/]+\.[chs]$'
+HeaderFilterRegex: '(^|/)(src/(app|bsp|platform|services|protocol|tasks)|board|tests)/.*\.(c|h|s)$'
 FormatStyle: none

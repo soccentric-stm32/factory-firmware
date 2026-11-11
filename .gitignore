@@ -1,5 +1,41 @@
+# Build output
 build/
+dist/
+compile_commands.json
+*.elf
+*.bin
+*.hex
+*.img
+*.map
+*.o
+*.d
+*.su
+
+# Host test artefacts
 tests/host/test_factory
 tests/host/libfactory_sim.so
+*.gcda
+*.gcno
+*.gcov
+
+# Signing keys (the shared development key is the only exception)
 *.pem
 !keys/dev-signing-key.pem
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Editor and tooling state
+.vscode/
+.idea/
+.cache/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

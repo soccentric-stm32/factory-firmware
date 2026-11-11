@@ -21,6 +21,8 @@
 #   make serial         serial console on the ST-LINK VCP (115200 8N1)
 #   make lint           clang-tidy static analysis
 #   make lint-strict    clang-tidy, failing on any finding
+#   make format         clang-format the project sources and headers
+#   make test           host tests of the factory command handler (no board)
 #   make probe          detect the ST-LINK and the target chip
 #   make size           show the firmware size
 #   make image          build the stm32-dev Docker image
@@ -38,7 +40,7 @@ BUILD_TYPE ?= Release
 NATIVE     ?= 0
 
 BUILD_DIR  := build
-ELF        := $(BUILD_DIR)/app.elf
+ELF        := $(BUILD_DIR)/factory.elf
 IMAGE      := $(BUILD_DIR)/factory.img
 DEV        := scripts/docker-dev.sh
 OPENOCD    := openocd -f board/st_nucleo_f7.cfg
@@ -52,8 +54,8 @@ PYTHON     ?= python3
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build configure clean rebuild lint lint-strict flash erase-all \
-        reset debug gdbserver serial probe size image help
+.PHONY: all build configure clean rebuild lint lint-strict format flash \
+        erase-all reset debug gdbserver serial probe size image test help
 
 all: build
 
@@ -74,13 +76,19 @@ clean:
 rebuild: clean
 	@$(MAKE) --no-print-directory build
 
-# clang-tidy needs the compile commands from a configured build tree.
+# clang-tidy needs the compile commands from a configured build tree. Reset
+# the strict flag so a previous lint-strict run does not leak into this one.
 lint: configure
+	$(DEV) run cmake -S /work -B /work/$(BUILD_DIR) -G Ninja -DAPP_LINT_STRICT=OFF
 	$(DEV) run cmake --build /work/$(BUILD_DIR) --target clang-tidy
 
 lint-strict:
 	$(DEV) run cmake -S /work -B /work/$(BUILD_DIR) -G Ninja -DAPP_LINT_STRICT=ON
 	$(DEV) run cmake --build /work/$(BUILD_DIR) --target clang-tidy
+
+# Format only hand-written code; src/generated is owned by flatcc.
+format:
+	clang-format -i $$(find src board tests -name '*.c' -o -name '*.h' | grep -v '/generated/')
 
 # A-6: never program the raw ELF into a slot. BOOT only starts an image
 # that has its 256-byte header, metadata and records, which bootctl writes.
@@ -149,6 +157,5 @@ help:
 	@sed -n '/^#   make/p; /^# Variables/,/^#$$/p' $(firstword $(MAKEFILE_LIST)) | sed 's/^# \{0,1\}//'
 
 # Host tests for the factory command handler (no board needed).
-.PHONY: test
 test:
 	$(MAKE) -C tests/host test

@@ -8,11 +8,11 @@
 # SRS:     BHOST-001, BHOST-002; SRS-BOOT-F767 section 5.1
 #
 # Usage:
-#   tools/mkimage.py --input build/app.bin --output build/app.img \
+#   tools/mkimage.py --input build/factory.bin --output build/factory.img \
 #       --version 0.1.0 --commit <40-hex> --timestamp <unix> \
 #       --name stm32-application
 #
-#   tools/mkimage.py --inspect build/app.img
+#   tools/mkimage.py --inspect build/factory.img
 #
 # The header is 256 bytes; the binary follows unchanged.  BOOT stores this
 # header in the slot metadata sector (IMG-006).

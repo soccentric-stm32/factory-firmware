@@ -1,5 +1,5 @@
 /*
- * board/app_board.h - NUCLEO-F767ZI pins used by the demo application
+ * board/app_board.h - NUCLEO-F767ZI pins used by the factory firmware
  *
  * Author:  Sandesh Ghimire <sandesh@soccentric.com>
  * Date:    2026-11-03

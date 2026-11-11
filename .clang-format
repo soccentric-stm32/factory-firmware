@@ -1,12 +1,10 @@
 #
-# .clang-format - formatting configuration for the FreeRTOS demo application
+# .clang-format - formatting configuration for the factory firmware
 #
-# Matches the existing style of src/ and board/: Allman braces,
-# 4-space indent, ~80-column wrapping with aligned assignments and trailing
-# comments.
+# Matches the existing style of src/ and board/: Allman braces, 4-space
+# indent, 90-column wrapping with aligned assignments and trailing comments.
 #
-# Run with:  clang-format -i src/*.c src/*.h board/**/*.c board/**/*.h
-# (use "make format" once wired into the Makefile)
+# Run with:  make format
 #
 ---
 Language:        Cpp

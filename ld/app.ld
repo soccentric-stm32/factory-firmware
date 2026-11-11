@@ -1,5 +1,5 @@
 /*
- * ld/app.ld - demo application linker script (runs under BOOT)
+ * ld/app.ld - factory application linker script (runs under BOOT)
  *
  * Author:  Sandesh Ghimire <sandesh@soccentric.com>
  * Date:    2026-11-03

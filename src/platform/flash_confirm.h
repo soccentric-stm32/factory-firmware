@@ -14,7 +14,7 @@
 
 /* Program the CONFIRMED record for the running slot if it is absent.
  * Returns true when the record is present after the call.  This is the only
- * flash write DEMO performs; the address is fixed by boot_contract.h and no
+ * flash write this firmware performs; the address is fixed by boot_contract.h and no
  * erase is ever issued. */
 bool app_flash_confirm_running_slot(void);
 

@@ -6,7 +6,7 @@
 | **Date** | 2026-11-03 |
 | **Board** | NUCLEO-F767ZI |
 
-the FreeRTOS demo application is built, flashed and debugged in the same `stm32-dev:latest` image as
+the factory firmware is built, flashed and debugged in the same `stm32-dev:latest` image as
 the validation firmware. [Dockerfile](Dockerfile) and
 [scripts/docker-dev.sh](../scripts/docker-dev.sh) are identical copies of the
 files in
@@ -23,7 +23,7 @@ host requirements, debugging) is in the validation firmware's
 ```bash
 scripts/docker-dev.sh build      # build the image (automatic on first use)
 scripts/build.sh                 # configure + build in the container
-make flash                       # upload build/demo.img through BOOT (bootctl)
+make flash                       # upload build/factory.img through BOOT (bootctl)
 make serial                      # ST-LINK VCP console, 115200 8N1
 ```
 

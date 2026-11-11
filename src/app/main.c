@@ -1,15 +1,15 @@
 /*
- * app - FreeRTOS demo application entry point
+ * main.c - factory firmware entry point
  *
  * Author:  Sandesh Ghimire <sandesh@soccentric.com>
  * Date:    2026-11-03
  * Target:  NUCLEO-F767ZI (STM32F767ZIT6), started by BOOT from slot A or B
  * SRS:     DBT-001..DBT-006, DGEN-001..DGEN-006, DRT-004, section 5
  *
- * DEMO runs only under BOOT.  It keeps the four documented tasks (Health,
- * Comms, Button, LED), speaks HWLINK on the ST-LINK VCP, and confirms a
- * pending slot after its health check.  Everything is created before the
- * scheduler starts; no task allocates memory afterwards.
+ * The factory firmware runs only under BOOT.  It keeps the four documented
+ * tasks (Health, Comms, Button, LED), speaks HWLINK on the ST-LINK VCP, and
+ * confirms a pending slot after its health check.  Everything is created
+ * before the scheduler starts; no task allocates memory afterwards.
  */
 
 #include "stm32f7xx_hal.h"

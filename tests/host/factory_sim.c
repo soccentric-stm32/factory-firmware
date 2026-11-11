@@ -10,7 +10,7 @@
 
 #include <string.h>
 #include <stdint.h>
-#include "../../src/factory_proto.h"
+#include "factory_proto.h"
 
 #define SIM_BASE   0x08104000UL
 #define SIM_SIZE   0x4000UL

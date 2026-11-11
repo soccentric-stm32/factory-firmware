@@ -7,7 +7,7 @@
  * SRS:     DBT-001, DBT-004, DBT-005, DBT-006, HLT-002, DSAFE-002
  *
  * The values in this file mirror SRS-BOOT-F767 LAY-001..LAY-005, HND-003 and
- * Appendix B.  DEMO only ever reads the slot metadata and programs the one
+ * Appendix B.  The application only ever reads the slot metadata and programs the one
  * CONFIRMED record.
  */
 
@@ -58,7 +58,7 @@
  *   bit  26      trial pending
  *   bits 27..28  trial counter (0..3)
  *
- * The exact packing is private to the BOOT/DEMO pair; BOOT writes the same
+ * The exact packing is private to the BOOT/application pair; BOOT writes the same
  * word.  A missing record (no BOOT) reads as erased/zero and is reported as
  * slot UNKNOWN (DBT-004). */
 #define APP_HANDOVER_MAGIC        0x00444E48UL  /* bytes "HND", 0 */

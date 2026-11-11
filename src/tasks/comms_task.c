@@ -7,11 +7,11 @@
  * SRS:     COM-001..COM-007, BTN-004, section 8
  *
  * One task parses COBS frames from the USART3 DMA ring, verifies every
- * FlatBuffer, executes the DEMO request set and sends the reply.  Repeated
- * request sequence numbers resend the previous response without executing
- * the request again (LNK-008).  All buffers are static; flatcc uses the
- * fixed arena in flatcc_port.c, so no task allocates after start-up
- * (DRT-004).
+ * FlatBuffer, executes the HWLINK and factory request set and sends the
+ * reply.  Repeated request sequence numbers resend the previous response
+ * without executing the request again (LNK-008).  All buffers are static;
+ * flatcc uses the fixed arena in flatcc_port.c, so no task allocates after
+ * start-up (DRT-004).
  */
 
 #include <string.h>

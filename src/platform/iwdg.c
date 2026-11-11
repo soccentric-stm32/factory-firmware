@@ -6,7 +6,7 @@
  * Target:  STM32F767ZIT6
  * SRS:     DBT-002, DRT-012, HLT-003, HND-004
  *
- * BOOT starts the IWDG with a 4 s timeout (TRY-004).  If DEMO is started
+ * BOOT starts the IWDG with a 4 s timeout (TRY-004).  If the firmware is started
  * without BOOT for debugging, it starts the same 4 s timeout itself.
  * LSI is nominally 32 kHz; prescaler /64 and reload 1999 give 4.0 s.
  */

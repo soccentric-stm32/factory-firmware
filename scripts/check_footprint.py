@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# check_footprint.py - print and enforce the DEMO flash/RAM budget
+# check_footprint.py - print and enforce the firmware flash/RAM budget
 #
 # Author:  Sandesh Ghimire <sandesh@soccentric.com>
 # Date:    2026-11-03
@@ -9,7 +9,7 @@
 #
 # Usage:
 #   scripts/check_footprint.py --size-tool arm-none-eabi-size \
-#       --max-flash 131072 --max-ram 98304 build/app.elf
+#       --max-flash 131072 --max-ram 98304 build/factory.elf
 
 import argparse
 import subprocess

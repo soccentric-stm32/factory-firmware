@@ -11,7 +11,8 @@
 #   cmake --build build
 # or simply: scripts/build.sh [clean]
 #
-# Outputs in build/: app.elf, app.bin, app.hex, app.map (DGEN-001).
+# Outputs in build/: factory.elf, factory.bin, factory.hex, factory.map and
+# factory.img (DGEN-001).
 #
 
 cmake_minimum_required(VERSION 3.22)
@@ -38,7 +39,7 @@ set(CMAKE_C_COMPILER   ${ARMCC})
 set(CMAKE_ASM_COMPILER ${ARMCC})
 set(CMAKE_OBJCOPY      ${ARMOBJCOPY})
 
-project(app LANGUAGES C ASM)
+project(factory-firmware LANGUAGES C ASM)
 
 # --- SDK location ----------------------------------------------------------
 # STM32CubeF7 v1.17.4 is provided by the docker image (DCON-002).
@@ -73,11 +74,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 add_compile_options(${CPU_FLAGS} -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
 # flatcc runtime allocation hooks (DRT-004) must be visible wherever the
 # runtime headers expand FLATCC_ALLOC.  Applied to C sources only.
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -include ${CMAKE_SOURCE_DIR}/src/flatcc_port.h")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -include ${CMAKE_SOURCE_DIR}/src/services/flatcc_port.h")
 # No stdio and no libc heap (FreeRTOS heap_4 is static), so no syscall layer
 # is linked.
 add_link_options(${CPU_FLAGS} -Wl,--gc-sections -Wl,--cref
-    -Wl,-Map=${CMAKE_BINARY_DIR}/app.map
+    -Wl,-Map=${CMAKE_BINARY_DIR}/factory.map
     --specs=nano.specs)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -103,7 +104,17 @@ add_compile_definitions(
     APP_BUILD_DATE="${APP_BUILD_DATE}"
     APP_BUILD_TIMESTAMP=${APP_BUILD_TIMESTAMP})
 
-include_directories(src board
+# Layered source tree.  Every layer is on the include path so modules can
+# keep using their short, unique header names.
+include_directories(
+    src
+    src/app
+    src/bsp
+    src/platform
+    src/services
+    src/protocol
+    src/tasks
+    board
     "${CMAKE_BINARY_DIR}/generated"
     "${CMAKE_SOURCE_DIR}/src/generated"
     "${CMAKE_SOURCE_DIR}/third_party/flatcc/include"
@@ -138,34 +149,40 @@ set(HAL_SOURCES
 
 # The generated flatcc headers use compact macro formatting that trips
 # -Wmisleading-indentation in the one translation unit that includes them.
-set_source_files_properties(src/comms_task.c PROPERTIES
+set_source_files_properties(src/tasks/comms_task.c PROPERTIES
     COMPILE_OPTIONS "-Wno-misleading-indentation")
 
 set(PROJECT_SOURCES
-    src/main.c
-    src/clock.c
-    src/hal_timebase.c
-    src/cache_mpu.c
-    src/crc32.c
-    src/identity.c
-    src/hwlink.c
-    src/flatcc_port.c
-    src/app_error.c
-    src/app_fault.c
-    src/app_log.c
-    src/task_report.c
-    src/reset_cause.c
-    src/iwdg.c
-    src/handover.c
-    src/flash_confirm.c
-    src/uart3.c
-    src/led_task.c
-    src/button_task.c
-    src/health_task.c
-    src/comms_task.c
-    src/factory_proto.c
-    src/factory_store.c
-    src/rtos_hooks.c)
+    # Application core
+    src/app/main.c
+    src/app/app_error.c
+    src/app/app_fault.c
+    src/app/app_log.c
+    src/app/task_report.c
+    src/app/rtos_hooks.c
+    # Board support package
+    src/bsp/clock.c
+    src/bsp/hal_timebase.c
+    src/bsp/cache_mpu.c
+    src/bsp/uart3.c
+    # Platform and boot contract
+    src/platform/handover.c
+    src/platform/reset_cause.c
+    src/platform/iwdg.c
+    src/platform/flash_confirm.c
+    # Services
+    src/services/crc32.c
+    src/services/identity.c
+    src/services/factory_store.c
+    src/services/flatcc_port.c
+    # Protocol
+    src/protocol/hwlink.c
+    src/protocol/factory_proto.c
+    # FreeRTOS tasks
+    src/tasks/led_task.c
+    src/tasks/button_task.c
+    src/tasks/health_task.c
+    src/tasks/comms_task.c)
 
 set(DEVICE_SOURCES
     "${CUBE_ROOT}/Drivers/CMSIS/Device/ST/STM32F7xx/Source/Templates/system_stm32f7xx.c"
@@ -193,9 +210,9 @@ set(FLATCC_SOURCES
     "${FLATCC_ROOT}/src/runtime/emitter.c"
     "${FLATCC_ROOT}/src/runtime/refmap.c")
 
-add_executable(app.elf ${PROJECT_SOURCES} ${HAL_SOURCES} ${FREERTOS_SOURCES}
+add_executable(factory.elf ${PROJECT_SOURCES} ${HAL_SOURCES} ${FREERTOS_SOURCES}
     ${DEVICE_SOURCES} ${FLATCC_SOURCES})
-target_compile_definitions(app.elf PRIVATE
+target_compile_definitions(factory.elf PRIVATE
     NDEBUG=1
     APP_RTOS_HEAP_SIZE=${APP_HEAP_BYTES}
     APP_FLATCC_HEAP_SIZE=${APP_FLATCC_HEAP_BYTES}
@@ -208,12 +225,12 @@ target_compile_definitions(app.elf PRIVATE
     FLATCC_EMITTER_ALLOC=app_flatcc_alloc
     FLATCC_EMITTER_FREE=app_flatcc_free)
 if(DEMO_FAIL_HEALTH)
-    target_compile_definitions(app.elf PRIVATE DEMO_FAIL_HEALTH=1)
+    target_compile_definitions(factory.elf PRIVATE DEMO_FAIL_HEALTH=1)
 endif()
 
 # DBT-001: vector table at 0x0800C000 (bootloader slot), at most 976 KB;
 # the linker script fails the build otherwise.
-target_link_options(app.elf PRIVATE
+target_link_options(factory.elf PRIVATE
     "-T${CMAKE_SOURCE_DIR}/ld/app.ld")
 
 # --- Static analysis (DNFR-004) ----------------------------------------------
@@ -245,17 +262,12 @@ add_custom_target(clang-tidy
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     VERBATIM)
 
-set(ELF "$<TARGET_FILE:app.elf>")
+set(ELF "$<TARGET_FILE:factory.elf>")
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-add_custom_command(TARGET app.elf POST_BUILD
-    COMMAND ${CMAKE_OBJCOPY} -O binary  ${ELF} ${CMAKE_BINARY_DIR}/app.bin
-    COMMAND ${CMAKE_OBJCOPY} -O ihex    ${ELF} ${CMAKE_BINARY_DIR}/app.hex
-    COMMAND ${CMAKE_COMMAND} -E copy ${ELF} ${CMAKE_BINARY_DIR}/factory.elf
+add_custom_command(TARGET factory.elf POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary  ${ELF} ${CMAKE_BINARY_DIR}/factory.bin
     COMMAND ${CMAKE_OBJCOPY} -O ihex    ${ELF} ${CMAKE_BINARY_DIR}/factory.hex
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/app.map
-            ${CMAKE_BINARY_DIR}/factory.map
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/mkimage.py
             --input ${CMAKE_BINARY_DIR}/factory.bin
             --output ${CMAKE_BINARY_DIR}/factory.img
@@ -263,21 +275,18 @@ add_custom_command(TARGET app.elf POST_BUILD
             --commit "${APP_GIT_COMMIT_FULL}"
             --timestamp ${APP_BUILD_TIMESTAMP}
             --name ${APP_FIRMWARE_NAME}
-    COMMAND ${SIZE_TOOL} $<TARGET_FILE:app.elf>
+    COMMAND ${SIZE_TOOL} ${ELF}
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/check_footprint.py
             --size-tool ${SIZE_TOOL}
             --max-flash ${MAX_FLASH_BYTES}
             --max-ram ${MAX_RAM_BYTES}
-            $<TARGET_FILE:app.elf>
+            ${ELF}
     BYPRODUCTS
-        ${CMAKE_BINARY_DIR}/app.bin
-        ${CMAKE_BINARY_DIR}/app.hex
-        ${CMAKE_BINARY_DIR}/factory.elf
         ${CMAKE_BINARY_DIR}/factory.bin
         ${CMAKE_BINARY_DIR}/factory.hex
         ${CMAKE_BINARY_DIR}/factory.map
         ${CMAKE_BINARY_DIR}/factory.img
-    COMMENT "Generating app.*, factory.* and factory.img; checking footprint")
+    COMMENT "Generating factory.* and factory.img; checking footprint")
 
 # --- HWLINK schema (LNK-012) -------------------------------------------------
 # The generated C files are committed so the container does not need a host
@@ -301,5 +310,5 @@ if(FLATCC)
         "${FLATCC_OUT}/hwlink_reader.h"
         "${FLATCC_OUT}/hwlink_builder.h"
         "${FLATCC_OUT}/hwlink_verifier.h")
-    add_dependencies(app.elf hwlink_schema)
+    add_dependencies(factory.elf hwlink_schema)
 endif()

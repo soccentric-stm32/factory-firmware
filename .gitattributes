@@ -1,0 +1,24 @@
+# Normalise line endings so the firmware builds the same on every host.
+* text=auto eol=lf
+
+*.c            text diff=c
+*.h            text diff=c
+*.s            text diff=asm
+*.ld           text
+*.fbs          text
+*.py           text
+*.sh           text eol=lf
+*.bat          text eol=crlf
+*.md           text
+Makefile       text
+Dockerfile     text
+
+# Build artefacts and binary assets.
+*.bin          binary
+*.elf          binary
+*.img          binary
+*.o            binary
+*.png          binary
+*.jpg          binary
+*.webp         binary
+*.pdf          binary
