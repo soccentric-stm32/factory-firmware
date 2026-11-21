@@ -1,16 +1,16 @@
-/*
- * health_task.c - task supervision, health check and CONFIRMED record
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  STM32F767ZIT6
- * SRS:     DRT-012, DRT-013, HLT-001..HLT-005
- *
- * The Health task is the only task that refreshes the IWDG.  Every other
- * task sets a bit in its notification value at least once per second.  If a
- * bit is missing for 2 s the Health task stops refreshing the watchdog and
- * the 4 s IWDG in BOOT resets the board.  For a pending slot it also runs
- * the health check after 5 s and writes CONFIRMED once.
+/**
+ * @file    health_task.c
+ * @brief   Task supervision, health check and CONFIRMED record.
+ * @details The Health task is the only task that refreshes the IWDG.  Every
+ *          other task sets a bit in its notification value at least once per
+ *          second.  If a bit is missing for 2 s the Health task stops
+ *          refreshing the watchdog and the 4 s IWDG in BOOT resets the board.
+ *          For a pending slot it also runs the health check after 5 s and
+ *          writes CONFIRMED once.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6
+ * @srs     DRT-012, DRT-013, HLT-001..HLT-005
  */
 
 #include "stm32f7xx_hal.h"
@@ -38,20 +38,26 @@
 #define HEALTH_MIN_CHECKINS      5U
 #define HEALTH_MIN_FREE_HEAP     4096U
 
-#define HEALTH_STATE_NOT_REQUIRED 0U
-#define HEALTH_STATE_RUNNING      1U
-#define HEALTH_STATE_PASSED       2U
-#define HEALTH_STATE_FAILED       3U
+#define HEALTH_STATE_NOT_REQUIRED 0U /**< No slot on trial. */
+#define HEALTH_STATE_RUNNING      1U /**< Trial boot, check pending. */
+#define HEALTH_STATE_PASSED       2U /**< CONFIRMED written. */
+#define HEALTH_STATE_FAILED       3U /**< Check failed, trial will fail. */
 
-static TaskHandle_t health_task_handle;
-static uint32_t checkin_count[HEALTH_TASK_COUNT + 1U];
-static uint32_t last_seen[HEALTH_TASK_COUNT + 1U];
-static uint32_t start_tick;
-static uint32_t last_kick;
-static volatile uint8_t health_state = HEALTH_STATE_NOT_REQUIRED;
-static bool check_done;
+static TaskHandle_t health_task_handle;               /**< Health task handle. */
+static uint32_t checkin_count[HEALTH_TASK_COUNT + 1U]; /**< Check-ins per slot. */
+static uint32_t last_seen[HEALTH_TASK_COUNT + 1U];     /**< Last check-in tick. */
+static uint32_t start_tick;                            /**< Tick the check started. */
+static uint32_t last_kick;                             /**< Tick of the last IWDG kick. */
+static volatile uint8_t health_state = HEALTH_STATE_NOT_REQUIRED; /**< HEALTH_STATE_*. */
+static bool check_done;                                /**< true once the check ran. */
+/** @brief true when a supervised task went quiet. */
 static bool supervision_lost;
 
+/**
+ * @brief Account the check-in bits collected by the last wait.
+ * @param[in] bits Notification bits, one per health_task_id_t.
+ * @param[in] now  Current tick.
+ */
 static void checkin_account(uint32_t bits, uint32_t now)
 {
     for (uint32_t i = 0U; i < HEALTH_TASK_COUNT; i++) {
@@ -66,6 +72,10 @@ static void checkin_account(uint32_t bits, uint32_t now)
     last_seen[HEALTH_TASK_COUNT] = now;
 }
 
+/**
+ * @brief Latch the loss of a slot that went quiet for longer than the timeout.
+ * @param[in] now Current tick.
+ */
 static void supervise(uint32_t now)
 {
     if (supervision_lost) {
@@ -79,6 +89,11 @@ static void supervise(uint32_t now)
     }
 }
 
+/**
+ * @brief Evaluate every condition the pending-slot check requires.
+ * @return true when all tasks checked in, no fault was recorded this boot and
+ *         the heap and UART receiver are healthy.
+ */
 static bool health_conditions_met(void)
 {
 #ifdef DEMO_FAIL_HEALTH
@@ -105,6 +120,7 @@ static bool health_conditions_met(void)
 #endif
 }
 
+/** @brief Latch the failure, show it on LD3 and let the trial fail. */
 static void health_check_fail(void)
 {
     check_done = true;
@@ -113,12 +129,17 @@ static void health_check_fail(void)
     (void)led_post_health_failed();
 }
 
+/** @brief Record that the slot passed its health check. */
 static void health_check_pass(void)
 {
     check_done = true;
     health_state = HEALTH_STATE_PASSED;
 }
 
+/**
+ * @brief Health task body: supervise, run the check, kick the watchdog.
+ * @param[in] arg Unused.
+ */
 static void health_task(void *arg)
 {
     (void)arg;

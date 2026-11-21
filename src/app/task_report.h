@@ -3,6 +3,10 @@
  * @brief   Once-a-second "task <n> <name>: <purpose>" line on the debug UART.
  * @details Each task calls @ref task_report every loop; it prints at most one
  *          line a second per task, so the log shows all four tasks running.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-06
+ * @target  STM32F767ZIT6
+ * @srs     DLOG-002
  */
 #ifndef TASK_REPORT_H
 #define TASK_REPORT_H

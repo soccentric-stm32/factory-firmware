@@ -1,22 +1,23 @@
-/*
- * factory_fb.c - FACTORY messages over HWLINK FlatBuffers (protocol minor 4)
+/**
+ * @file    factory_fb.c
+ * @brief   FACTORY messages over HWLINK FlatBuffers (protocol minor 4).
+ * @details This file contains a small, bounded FlatBuffers encoder and
+ *          decoder for the FACTORY message set.  It exists so the firmware
+ *          can migrate to HWLINK FlatBuffers without regenerating the flatcc
+ *          headers on every bench; the generated HWLINK tables are still used
+ *          for all existing messages.  The encoder builds a standard
+ *          FlatBuffer (root uoffset, HWLK identifier, back-to-front vtables)
+ *          that the Python generated accessors and flatcc read unchanged.
  *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-19
- * Target:  STM32F767ZIT6 (also builds on the host for tests)
- *
- * This file contains a small, bounded FlatBuffers encoder and decoder for the
- * FACTORY message set.  It exists so the firmware can migrate to HWLINK
- * FlatBuffers without regenerating the flatcc headers on every bench; the
- * generated HWLINK tables are still used for all existing messages.  The
- * encoder builds a standard FlatBuffer (root uoffset, HWLK identifier,
- * back-to-front vtables) that the Python generated accessors and flatcc read
- * unchanged.
- *
- * Command semantics stay in factory_proto.c: this module packs the request
- * into the legacy binary command, calls factory_handle() and unpacks the
- * reply into the new message.  That keeps one implementation of the header,
- * CRC and UID checks for both protocols.
+ *          Command semantics stay in factory_proto.c: this module packs the
+ *          request into the legacy binary command, calls factory_handle() and
+ *          unpacks the reply into the new message.  That keeps one
+ *          implementation of the header, CRC and UID checks for both
+ *          protocols.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-19
+ * @target  STM32F767ZIT6 (also builds on the host for tests)
+ * @srs     docs/FACTORY_SPEC.md, protocol/hwlink.fbs
  */
 
 #include <string.h>
@@ -56,30 +57,35 @@ static uint8_t fb_arena[FB_ARENA_SIZE] __attribute__((aligned(8)));
 
 /* ---------------------------------------------------------------- builder */
 
+/** @brief Back-to-front buffer writer: data grows down from @ref head. */
 typedef struct {
-    uint8_t *buf;
-    size_t size;
-    size_t head;
-    int failed;
+    uint8_t *buf; /**< Arena to build in. */
+    size_t size;  /**< Arena size, bytes. */
+    size_t head;  /**< First free byte counting down. */
+    int failed;   /**< Non-zero once the arena is exhausted. */
 } fbb_t;
 
+/** @brief Little-endian u32 from a buffer. */
 static uint32_t rd_u32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8U) |
            ((uint32_t)p[2] << 16U) | ((uint32_t)p[3] << 24U);
 }
 
+/** @brief Little-endian u16 from a buffer. */
 static uint16_t rd_u16(const uint8_t *p)
 {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8U));
 }
 
+/** @brief Store a little-endian u16. */
 static void wr_u16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)v;
     p[1] = (uint8_t)(v >> 8U);
 }
 
+/** @brief Store a little-endian u32. */
 static void wr_u32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v;
@@ -88,6 +94,12 @@ static void wr_u32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)(v >> 24U);
 }
 
+/**
+ * @brief Prepare an arena for a back-to-front build.
+ * @param[out] b    Writer state.
+ * @param[out] buf  Arena; zeroed so padding is deterministic.
+ * @param[in]  size Arena size, bytes.
+ */
 static void fbb_init(fbb_t *b, uint8_t *buf, size_t size)
 {
     b->buf = buf;
@@ -97,6 +109,13 @@ static void fbb_init(fbb_t *b, uint8_t *buf, size_t size)
     memset(buf, 0, size);
 }
 
+/**
+ * @brief Reserve @p n bytes, aligned, and return their offset.
+ * @param[in,out] b     Writer state; latches @ref fbb_t::failed on overflow.
+ * @param[in]     n     Bytes to reserve.
+ * @param[in]     align Alignment, must be a power of two.
+ * @return Offset of the block, or 0 when it does not fit.
+ */
 static size_t fbb_place(fbb_t *b, size_t n, size_t align)
 {
     if (b->failed || n == 0U || align == 0U) {
@@ -116,6 +135,12 @@ static size_t fbb_place(fbb_t *b, size_t n, size_t align)
     return pos;
 }
 
+/**
+ * @brief Write a FlatBuffers string and return its offset.
+ * @param[in,out] b    Writer state.
+ * @param[in]     text NUL-terminated text, or NULL for an empty string.
+ * @return Offset of the string, or 0 on failure.
+ */
 static size_t fbb_string(fbb_t *b, const char *text)
 {
     size_t len = text != NULL ? strlen(text) : 0U;
@@ -131,6 +156,13 @@ static size_t fbb_string(fbb_t *b, const char *text)
     return pos;
 }
 
+/**
+ * @brief Write a vector of bytes and return its offset.
+ * @param[in,out] b    Writer state.
+ * @param[in]     data Bytes to copy, may be NULL when @p len is 0.
+ * @param[in]     len  Length, bytes.
+ * @return Offset of the vector, or 0 on failure.
+ */
 static size_t fbb_bytes(fbb_t *b, const uint8_t *data, size_t len)
 {
     size_t pos = fbb_place(b, 4U + len, 4U);
@@ -144,19 +176,27 @@ static size_t fbb_bytes(fbb_t *b, const uint8_t *data, size_t len)
     return pos;
 }
 
+/** @brief One written table field: vtable slot, width and offset. */
 typedef struct {
-    uint8_t field;
-    uint8_t size;
-    size_t pos;
+    uint8_t field; /**< Vtable slot. */
+    uint8_t size;  /**< Field width, bytes; 0 means unused slot. */
+    size_t pos;    /**< Payload offset in the arena. */
 } fb_field_t;
 
+/** @brief Table under construction. */
 typedef struct {
-    fbb_t *b;
-    size_t table_pos;
-    int count;
-    fb_field_t items[FB_MAX_FIELDS];
+    fbb_t *b;        /**< Writer state. */
+    size_t table_pos;/**< Offset of the table itself. */
+    int count;       /**< Vtable slots, at most FB_MAX_FIELDS. */
+    fb_field_t items[FB_MAX_FIELDS]; /**< Written fields. */
 } fbt_t;
 
+/**
+ * @brief Start a table with @p count vtable slots.
+ * @param[out] t     Table state.
+ * @param[in,out] b  Writer state.
+ * @param[in] count  Slots; clamped to FB_MAX_FIELDS.
+ */
 static void fbt_start(fbt_t *t, fbb_t *b, int count)
 {
     t->b = b;
@@ -165,6 +205,13 @@ static void fbt_start(fbt_t *t, fbb_t *b, int count)
     memset(t->items, 0, sizeof(t->items));
 }
 
+/**
+ * @brief Write one scalar field.
+ * @param[in,out] t     Table state.
+ * @param[in]     field Vtable slot.
+ * @param[in]     size  Field width, 1, 2, 4 or 8 bytes.
+ * @param[in]     value Value, truncated to @p size.
+ */
 static void fbt_scalar(fbt_t *t, uint8_t field, uint8_t size, uint32_t value)
 {
     if (t->count <= 0 || t->b->failed) {
@@ -194,26 +241,31 @@ static void fbt_scalar(fbt_t *t, uint8_t field, uint8_t size, uint32_t value)
     }
 }
 
+/** @brief Write a u8/bool field. */
 static void fbt_u8(fbt_t *t, uint8_t field, uint8_t value)
 {
     fbt_scalar(t, field, 1U, value);
 }
 
+/** @brief Write a u16 field. */
 static void fbt_u16(fbt_t *t, uint8_t field, uint16_t value)
 {
     fbt_scalar(t, field, 2U, value);
 }
 
+/** @brief Write a u32 field. */
 static void fbt_u32(fbt_t *t, uint8_t field, uint32_t value)
 {
     fbt_scalar(t, field, 4U, value);
 }
 
+/** @brief Write a bool field. */
 static void fbt_bool(fbt_t *t, uint8_t field, bool value)
 {
     fbt_scalar(t, field, 1U, value ? 1U : 0U);
 }
 
+/** @brief Write a u64 field (little-endian, 8-byte aligned). */
 static void fbt_u64(fbt_t *t, uint8_t field, uint64_t value)
 {
     if (t->count <= 0 || t->b->failed) {
@@ -235,6 +287,12 @@ static void fbt_u64(fbt_t *t, uint8_t field, uint64_t value)
     wr_u32(&t->b->buf[pos + 4U], (uint32_t)(value >> 32U));
 }
 
+/**
+ * @brief Write a uoffset field that points at an already written object.
+ * @param[in,out] t      Table state.
+ * @param[in]     field  Vtable slot.
+ * @param[in]     target Arena offset of the referenced object; 0 is ignored.
+ */
 static void fbt_offset(fbt_t *t, uint8_t field, size_t target)
 {
     if (target == 0U || t->count <= 0 || t->b->failed) {
@@ -255,6 +313,11 @@ static void fbt_offset(fbt_t *t, uint8_t field, size_t target)
     wr_u32(&t->b->buf[pos], (uint32_t)(target - pos));
 }
 
+/**
+ * @brief Finish a table: emit the vtable and fill in the table header.
+ * @param[in,out] t Table state.
+ * @return Offset of the table, or 0 on failure.
+ */
 static size_t fbt_end(fbt_t *t)
 {
     fbb_t *b = t->b;
@@ -296,6 +359,13 @@ static size_t fbt_end(fbt_t *t)
     return table_pos;
 }
 
+/**
+ * @brief Write a vector of table offsets.
+ * @param[in,out] b     Writer state.
+ * @param[in]     tables Table offsets to reference.
+ * @param[in]     count  Number of entries.
+ * @return Offset of the vector, or 0 on failure.
+ */
 static size_t fbb_vector_tables(fbb_t *b, const size_t *tables, size_t count)
 {
     size_t pos = fbb_place(b, 4U + 4U * count, 4U);
@@ -310,6 +380,15 @@ static size_t fbb_vector_tables(fbb_t *b, const size_t *tables, size_t count)
     return pos;
 }
 
+/**
+ * @brief Wrap a body in a Message root, add the HWLK identifier and copy out.
+ * @param[in,out] b            Writer state.
+ * @param[in]     body_type    Body union member number.
+ * @param[in]     body         Offset of the body table.
+ * @param[out]    out          Destination for the finished buffer.
+ * @param[in]     out_capacity Capacity of @p out, bytes.
+ * @return Buffer length, or 0 on failure.
+ */
 static size_t fbb_finish(fbb_t *b, uint8_t body_type, size_t body,
                          uint8_t *out, size_t out_capacity)
 {
@@ -342,16 +421,29 @@ static size_t fbb_finish(fbb_t *b, uint8_t body_type, size_t body,
 
 /* ---------------------------------------------------------------- reader */
 
+/** @brief Read window over a received message. */
 typedef struct {
-    const uint8_t *base;
-    const uint8_t *end;
+    const uint8_t *base; /**< Start of the message. */
+    const uint8_t *end;  /**< One past the last byte. */
 } fbr_t;
 
+/**
+ * @brief Check that @p n bytes at @p p lie inside the message.
+ * @param[in] r Read window.
+ * @param[in] p Address to check.
+ * @param[in] n Bytes needed at @p p.
+ * @return true when the range is inside the message.
+ */
 static bool fbr_range(const fbr_t *r, const uint8_t *p, size_t n)
 {
     return p >= r->base && p <= r->end && n <= (size_t)(r->end - p);
 }
 
+/**
+ * @brief Follow the root uoffset.
+ * @param[in] r Read window.
+ * @return Root table, or NULL when the offset is out of range.
+ */
 static const uint8_t *fbr_root(const fbr_t *r)
 {
     if (!fbr_range(r, r->base, 8U)) {
@@ -364,6 +456,13 @@ static const uint8_t *fbr_root(const fbr_t *r)
     return r->base + off;
 }
 
+/**
+ * @brief Look up one field through the table's vtable.
+ * @param[in] r     Read window.
+ * @param[in] table Table to read.
+ * @param[in] field Vtable slot.
+ * @return Field pointer, or NULL when it is absent or out of range.
+ */
 static const uint8_t *fbr_field(const fbr_t *r, const uint8_t *table,
                                 uint8_t field)
 {
@@ -390,6 +489,7 @@ static const uint8_t *fbr_field(const fbr_t *r, const uint8_t *table,
     return p;
 }
 
+/** @brief Read a u8 field; absent means 0. */
 static bool fbr_u8(const fbr_t *r, const uint8_t *table, uint8_t field, uint8_t *out)
 {
     const uint8_t *p = fbr_field(r, table, field);
@@ -401,6 +501,7 @@ static bool fbr_u8(const fbr_t *r, const uint8_t *table, uint8_t field, uint8_t 
     return true;
 }
 
+/** @brief Read a u16 field; absent means 0. */
 static bool fbr_u16(const fbr_t *r, const uint8_t *table, uint8_t field, uint16_t *out)
 {
     const uint8_t *p = fbr_field(r, table, field);
@@ -415,6 +516,7 @@ static bool fbr_u16(const fbr_t *r, const uint8_t *table, uint8_t field, uint16_
     return true;
 }
 
+/** @brief Read a u32 field; absent means 0. */
 static bool fbr_u32(const fbr_t *r, const uint8_t *table, uint8_t field, uint32_t *out)
 {
     const uint8_t *p = fbr_field(r, table, field);
@@ -429,6 +531,10 @@ static bool fbr_u32(const fbr_t *r, const uint8_t *table, uint8_t field, uint32_
     return true;
 }
 
+/**
+ * @brief Follow a table-offset field.
+ * @return Sub-table, or NULL when the field is absent or out of range.
+ */
 static const uint8_t *fbr_table(const fbr_t *r, const uint8_t *table, uint8_t field)
 {
     const uint8_t *p = fbr_field(r, table, field);
@@ -443,6 +549,15 @@ static const uint8_t *fbr_table(const fbr_t *r, const uint8_t *table, uint8_t fi
     return target;
 }
 
+/**
+ * @brief Read a byte-vector field.
+ * @param[in]  r     Read window.
+ * @param[in]  table Table holding the field.
+ * @param[in]  field Vtable slot.
+ * @param[out] data  Vector contents.
+ * @param[out] len   Vector length, bytes.
+ * @return true when the vector is present and inside the message.
+ */
 static bool fbr_vector(const fbr_t *r, const uint8_t *table, uint8_t field,
                        const uint8_t **data, uint32_t *len)
 {
@@ -466,6 +581,7 @@ static bool fbr_vector(const fbr_t *r, const uint8_t *table, uint8_t field,
 
 /* ------------------------------------------------------------- replies */
 
+/** @brief Build an Ack body and finish the message. */
 static size_t fb_ack(uint8_t *reply, size_t capacity, uint16_t seq, uint16_t body_type)
 {
     fbb_t b;
@@ -478,6 +594,15 @@ static size_t fb_ack(uint8_t *reply, size_t capacity, uint16_t seq, uint16_t bod
     return fbb_finish(&b, body_type, body, reply, capacity);
 }
 
+/**
+ * @brief Build a Nak body with an error value and detail text.
+ * @param[out] reply    Reply buffer.
+ * @param[in]  capacity Capacity of @p reply, bytes.
+ * @param[in]  seq      Sequence number being refused.
+ * @param[in]  error    FB_ERR_* value.
+ * @param[in]  detail   Detail text, or NULL.
+ * @return Reply length, or 0 on failure.
+ */
 static size_t fb_nak(uint8_t *reply, size_t capacity, uint16_t seq,
                      uint16_t error, const char *detail)
 {
@@ -494,6 +619,11 @@ static size_t fb_nak(uint8_t *reply, size_t capacity, uint16_t seq,
     return fbb_finish(&b, 7U /* Body.Nak */, body, reply, capacity);
 }
 
+/**
+ * @brief Map a FACTORY_ERR_* status to the HWLINK Error value.
+ * @param[in] status FACTORY_OK or a FACTORY_ERR_* value.
+ * @return FB_ERR_* value to report.
+ */
 static uint16_t map_error(uint8_t status)
 {
     switch (status) {
@@ -516,6 +646,7 @@ static uint16_t map_error(uint8_t status)
     }
 }
 
+/** @brief Build the HelloReply for the FACTORY role. */
 static size_t fb_hello_reply(const factory_ops_t *ops, uint8_t *reply,
                              size_t capacity, uint16_t seq)
 {
@@ -547,6 +678,7 @@ static size_t fb_hello_reply(const factory_ops_t *ops, uint8_t *reply,
 
 /* -------------------------------------------------------------- handlers */
 
+/** @brief Handle GetFactoryInfo: run INFO and repack it as FactoryInfo. */
 static size_t handle_get_info(const factory_ops_t *ops, uint8_t *reply,
                               size_t capacity, uint16_t seq)
 {
@@ -597,6 +729,7 @@ static size_t handle_get_info(const factory_ops_t *ops, uint8_t *reply,
     return fbb_finish(&b, FACTORY_FB_FACTORY_INFO, body, reply, capacity);
 }
 
+/** @brief Handle ReadMemory: run READ and repack it as MemoryData. */
 static size_t handle_read(const factory_ops_t *ops, const fbr_t *r,
                           const uint8_t *request, uint8_t *reply,
                           size_t capacity, uint16_t seq)
@@ -630,6 +763,7 @@ static size_t handle_read(const factory_ops_t *ops, const fbr_t *r,
     return fbb_finish(&b, FACTORY_FB_MEMORY_DATA, body, reply, capacity);
 }
 
+/** @brief Handle FactoryWriteBegin: run WRITE_BEGIN and Ack or Nak. */
 static size_t handle_write_begin(const factory_ops_t *ops, const fbr_t *r,
                                  const uint8_t *request, uint8_t *reply,
                                  size_t capacity, uint16_t seq)
@@ -658,6 +792,7 @@ static size_t handle_write_begin(const factory_ops_t *ops, const fbr_t *r,
     return fb_ack(reply, capacity, seq, 6U /* Body.Ack */);
 }
 
+/** @brief Handle FactoryWriteData: run WRITE_DATA and Ack or Nak. */
 static size_t handle_write_data(const factory_ops_t *ops, const fbr_t *r,
                                 const uint8_t *request, uint8_t *reply,
                                 size_t capacity, uint16_t seq)
@@ -684,6 +819,16 @@ static size_t handle_write_data(const factory_ops_t *ops, const fbr_t *r,
     return fb_ack(reply, capacity, seq, 6U);
 }
 
+/**
+ * @brief Build a WriteResult body.
+ * @param[out] reply    Reply buffer.
+ * @param[in]  capacity Capacity of @p reply, bytes.
+ * @param[in]  success  true when the block was programmed and verified.
+ * @param[in]  crc      CRC-32 of the written block.
+ * @param[in]  error    FB_ERR_* value, FB_ERR_NONE on success.
+ * @param[in]  detail   Human-readable detail, or NULL.
+ * @return Reply length, or 0 on failure.
+ */
 static size_t fb_write_result(uint8_t *reply, size_t capacity, bool success,
                               uint32_t crc, uint16_t error, const char *detail)
 {
@@ -700,6 +845,7 @@ static size_t fb_write_result(uint8_t *reply, size_t capacity, bool success,
     return fbb_finish(&b, FACTORY_FB_WRITE_RESULT, body, reply, capacity);
 }
 
+/** @brief Handle FactoryWriteEnd: run WRITE_END and reply WriteResult. */
 static size_t handle_write_end(const factory_ops_t *ops, uint8_t *reply,
                                size_t capacity, uint16_t seq)
 {
@@ -715,6 +861,7 @@ static size_t handle_write_end(const factory_ops_t *ops, uint8_t *reply,
     return fb_write_result(reply, capacity, false, 0U, status, "write end failed");
 }
 
+/** @brief Handle DiagInit: run DIAG_INIT and reply WriteResult. */
 static size_t handle_diag_init(const factory_ops_t *ops, const fbr_t *r,
                                const uint8_t *request, uint8_t *reply,
                                size_t capacity, uint16_t seq)
@@ -736,6 +883,7 @@ static size_t handle_diag_init(const factory_ops_t *ops, const fbr_t *r,
     return fb_write_result(reply, capacity, false, 0U, status, "diag init failed");
 }
 
+/** @brief Handle SelfTest: run SELFTEST and repack the items as a vector. */
 static size_t handle_selftest(const factory_ops_t *ops, uint8_t *reply,
                               size_t capacity, uint16_t seq)
 {

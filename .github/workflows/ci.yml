@@ -24,6 +24,16 @@ jobs:
       - name: Build and run the command-handler tests
         run: make test
 
+  docs:
+    name: API documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+      - name: Check the doxygen blocks of every source and header
+        run: make docs-check
+
   firmware:
     name: Cross build (manual)
     if: github.event_name == 'workflow_dispatch'

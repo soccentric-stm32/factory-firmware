@@ -1,15 +1,15 @@
-/*
- * led_task.c - LED patterns and LD3 error display (section 6)
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  NUCLEO-F767ZI
- * SRS:     LED-001..LED-007, BTN-002, BTN-003
- *
- * The task owns the pattern state.  Other tasks send queue messages; button
- * presses arrive through the same queue and the selected pattern is reported
- * back to Comms as a ButtonEvent.  Pattern transitions are scheduled to the
- * next tick boundary (LED-006), not to a fixed polling rate.
+/**
+ * @file    led_task.c
+ * @brief   LED patterns and LD3 error display (section 6).
+ * @details The task owns the pattern state.  Other tasks send queue messages;
+ *          button presses arrive through the same queue and the selected
+ *          pattern is reported back to Comms as a ButtonEvent.  Pattern
+ *          transitions are scheduled to the next tick boundary (LED-006), not
+ *          to a fixed polling rate.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  NUCLEO-F767ZI
+ * @srs     LED-001..LED-007, BTN-002, BTN-003
  */
 
 #include "stm32f7xx_hal.h"
@@ -34,41 +34,63 @@
 
 #define NO_TRANSITION           0xFFFFFFFFUL
 
+/** @brief Commands other tasks post to the LED queue. */
 typedef enum {
-    LED_MSG_SET = 0,
-    LED_MSG_SET_ALL,
-    LED_MSG_BUTTON,
-    LED_MSG_CLEAR_ERROR,
-    LED_MSG_HEALTH_FAILED
+    LED_MSG_SET = 0,        /**< Set one LED. */
+    LED_MSG_SET_ALL,        /**< Set all LEDs. */
+    LED_MSG_BUTTON,         /**< Short or long button press. */
+    LED_MSG_CLEAR_ERROR,    /**< ClearFault: drop the error display. */
+    LED_MSG_HEALTH_FAILED   /**< Health check failed. */
 } led_msg_type_t;
 
+/** @brief One queue message; only the fields of @ref type are used. */
 typedef struct {
-    uint8_t type;
-    uint8_t led;
-    uint8_t pattern;
-    uint8_t press;
-    uint16_t period;
-    bool force;
+    uint8_t type;     /**< One of @ref led_msg_type_t. */
+    uint8_t led;      /**< APP_LED_ID_* for LED_MSG_SET. */
+    uint8_t pattern;  /**< APP_PATTERN_*. */
+    uint8_t press;    /**< 1 short, 2 long for LED_MSG_BUTTON. */
+    uint16_t period;  /**< Period, ms. */
+    bool force;       /**< Allow a set of LD3 during an error. */
 } led_msg_t;
 
+/** @brief Pattern state of one LED. */
 typedef struct {
-    uint8_t pattern;
-    uint16_t period;
-    uint32_t start;
+    uint8_t pattern;  /**< APP_PATTERN_*. */
+    uint16_t period;  /**< Period, ms. */
+    uint32_t start;   /**< Tick the pattern started at. */
 } led_cfg_t;
 
-static QueueHandle_t led_queue;
+static QueueHandle_t led_queue; /**< Command queue, created by led_task_create(). */
 
+/**
+ * @brief Step to the next pattern, wrapping at APP_PATTERN_COUNT.
+ * @param[in] current Current pattern id.
+ * @return Next pattern id.
+ */
 static uint32_t next_pattern(uint32_t current)
 {
     return (current + 1U) % APP_PATTERN_COUNT;
 }
 
+/**
+ * @brief Drive one LED pin through BSRR (atomic, no read-modify-write).
+ * @param[in] port GPIO port of the LED.
+ * @param[in] pin  Pin mask.
+ * @param[in] on   true lights the LED.
+ */
 static void led_write(GPIO_TypeDef *port, uint32_t pin, bool on)
 {
     port->BSRR = on ? pin : (pin << 16U);
 }
 
+/**
+ * @brief Expand a pattern into on/off segments of one cycle.
+ * @param[in]  cfg        Pattern to expand.
+ * @param[in]  second_led true for LD2, which offsets CHASE by half a cycle.
+ * @param[out] dur        Segment durations, ms.
+ * @param[out] on         Segment levels, true = lit.
+ * @return Number of segments written (at most 20).
+ */
 static uint32_t segments_for(const led_cfg_t *cfg, bool second_led,
                              uint16_t dur[20], bool on[20])
 {
@@ -173,6 +195,15 @@ static uint32_t segments_for(const led_cfg_t *cfg, bool second_led,
     return n;
 }
 
+/**
+ * @brief Work out the level of a pattern now and when it changes next.
+ * @param[in]  cfg        Pattern state, including its start tick.
+ * @param[in]  second_led true for LD2.
+ * @param[in]  now        Current tick.
+ * @param[out] level      LED level now.
+ * @param[out] next_ms    Ticks until the next transition, or NO_TRANSITION
+ *                        for OFF/ON.
+ */
 static void evaluate(const led_cfg_t *cfg, bool second_led, uint32_t now,
                      bool *level, uint32_t *next_ms)
 {
@@ -219,11 +250,20 @@ static void evaluate(const led_cfg_t *cfg, bool second_led, uint32_t now,
     *next_ms = cycle - pos;
 }
 
+/** @brief Report the selected pattern to Comms as a ButtonEvent (BTN-004). */
 static void send_button_event(uint8_t press, uint8_t pattern, uint16_t period)
 {
     comms_post_button_event(press, pattern, period);
 }
 
+/**
+ * @brief Apply one LED_MSG_SET, keeping LD1/LD2 consistent during CHASE.
+ * @param[in,out] cfg    Pattern state of the three LEDs.
+ * @param[in]     led    Target LED.
+ * @param[in]     pattern APP_PATTERN_*.
+ * @param[in]     period Period, ms.
+ * @param[in]     now    Tick the pattern starts at.
+ */
 static void apply_set(led_cfg_t cfg[3], uint8_t led, uint8_t pattern,
                       uint16_t period, uint32_t now)
 {
@@ -264,6 +304,13 @@ static void apply_set(led_cfg_t cfg[3], uint8_t led, uint8_t pattern,
     cfg[index].start = now;
 }
 
+/**
+ * @brief Apply one queue message to the pattern state and the error latch.
+ * @param[in,out] cfg         Pattern state of the three LEDs.
+ * @param[in]     msg         Message to apply.
+ * @param[in]     now         Current tick.
+ * @param[in,out] error_flags Local copy of app_error_flags.
+ */
 static void handle_message(led_cfg_t cfg[3], const led_msg_t *msg,
                            uint32_t now, uint32_t *error_flags)
 {
@@ -320,6 +367,11 @@ static void handle_message(led_cfg_t cfg[3], const led_msg_t *msg,
     }
 }
 
+/**
+ * @brief LED task body: apply queued commands and sleep until the next edge.
+ * @param[in] arg Unused.
+ * @note LD3 shows a latched error over the normal pattern (LED-005).
+ */
 static void led_task(void *arg)
 {
     (void)arg;
@@ -427,6 +479,12 @@ bool led_task_create(void)
                        LED_TASK_PRIORITY, NULL) == pdPASS;
 }
 
+/**
+ * @brief Queue a message without blocking.
+ * @param[in] msg Message to queue.
+ * @return true when it was queued; false when the task is not running yet or
+ *         the queue is full.
+ */
 static bool led_post(const led_msg_t *msg)
 {
     if (led_queue == NULL) {

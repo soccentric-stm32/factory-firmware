@@ -3,6 +3,7 @@
  * @brief   216 MHz core clock set-up.
  * @author  Sandesh Ghimire <sandesh@soccentric.com>
  * @date    2026-11-03
+ * @target  STM32F767ZIT6, HSE bypass from the ST-LINK MCO
  * @srs     DGEN-003, DBT-003
  */
 

@@ -244,7 +244,6 @@ void app_log(char level, const char *fmt, ...)
 
 /**
  * @brief Poll the ring out with interrupts off until TC, or time out.
- * @param[in] timeout_ms Approximate bound, ms.
  */
 void app_log_flush(uint32_t timeout_ms)
 {

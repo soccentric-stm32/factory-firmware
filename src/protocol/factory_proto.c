@@ -1,41 +1,46 @@
-/*
- * factory_proto.c - factory command handler (docs/FACTORY_SPEC.md section 5)
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-09
- * Target:  STM32F767ZIT6 (also builds on the host for tests)
- *
- * A write is staged in RAM (WRITE_BEGIN, WRITE_DATA, WRITE_END), checked
- * against the file header and CRCs, then handed to flash_write_block as one
- * erased and re-programmed 4 KB block.  Nothing reaches flash before
- * WRITE_END has validated the whole file.
+/**
+ * @file    factory_proto.c
+ * @brief   Factory command handler (docs/FACTORY_SPEC.md section 5).
+ * @details A write is staged in RAM (WRITE_BEGIN, WRITE_DATA, WRITE_END),
+ *          checked against the file header and CRCs, then handed to
+ *          flash_write_block as one erased and re-programmed 4 KB block.
+ *          Nothing reaches flash before WRITE_END has validated the whole
+ *          file.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-09
+ * @target  STM32F767ZIT6 (also builds on the host for tests)
+ * @srs     docs/FACTORY_SPEC.md section 5
  */
 
 #include <string.h>
 #include "factory_proto.h"
 
+/** @brief One block write in progress. */
 typedef struct {
-    bool active;
-    uint32_t address;
-    uint16_t total;
-    uint16_t received;
-    uint32_t crc;
-    uint8_t data[FACTORY_BLOCK_SIZE];
+    bool active;                    /**< true between BEGIN and END. */
+    uint32_t address;               /**< Block address of the write. */
+    uint16_t total;                 /**< Declared file length, bytes. */
+    uint16_t received;              /**< Bytes staged so far. */
+    uint32_t crc;                   /**< CRC-32 the host declared for the file. */
+    uint8_t data[FACTORY_BLOCK_SIZE]; /**< Staging buffer for the block. */
 } write_session_t;
 
-static write_session_t session;
+static write_session_t session; /**< The single write session. */
 
+/** @brief Little-endian u32 from the wire. */
 static uint32_t get_u32(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8U) |
            ((uint32_t)p[2] << 16U) | ((uint32_t)p[3] << 24U);
 }
 
+/** @brief Little-endian u16 from the wire. */
 static uint16_t get_u16(const uint8_t *p)
 {
     return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8U));
 }
 
+/** @brief Little-endian u32 to the wire. */
 static void put_u32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v;
@@ -44,24 +49,43 @@ static void put_u32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)(v >> 24U);
 }
 
+/** @brief Little-endian u16 to the wire. */
 static void put_u16(uint8_t *p, uint16_t v)
 {
     p[0] = (uint8_t)v;
     p[1] = (uint8_t)(v >> 8U);
 }
 
+/**
+ * @brief Check that a range lies inside the factory data window.
+ * @param[in] address Logical address.
+ * @param[in] length  Range length, bytes.
+ * @return true when the whole range is writable.
+ */
 static bool in_window(uint32_t address, uint32_t length)
 {
     return address >= FACTORY_WINDOW_BASE && length <= FACTORY_WINDOW_END &&
            address <= FACTORY_WINDOW_END - length;
 }
 
+/**
+ * @brief Check for a block-aligned 4 KB block inside the window.
+ * @param[in] address Logical address.
+ * @return true when a block write may target @p address.
+ */
 static bool block_address_ok(uint32_t address)
 {
     return in_window(address, FACTORY_BLOCK_SIZE) &&
            (address % FACTORY_BLOCK_SIZE) == 0U;
 }
 
+/**
+ * @brief Write the two-byte command/status reply prefix.
+ * @param[in]  cmd    Command being answered.
+ * @param[in]  status FACTORY_OK or a FACTORY_ERR_* value.
+ * @param[out] reply  Reply buffer.
+ * @return Prefix length, 2.
+ */
 static size_t reply_status(uint8_t cmd, uint8_t status, uint8_t *reply)
 {
     reply[0] = (uint8_t)(cmd | FACTORY_REPLY_FLAG);
@@ -69,6 +93,14 @@ static size_t reply_status(uint8_t cmd, uint8_t status, uint8_t *reply)
     return 2U;
 }
 
+/**
+ * @brief Append a length-prefixed string to the reply.
+ * @param[out] out      Reply buffer.
+ * @param[in]  at       Current write offset.
+ * @param[in]  capacity Capacity of @p out, bytes.
+ * @param[in]  text     NUL-terminated text.
+ * @return New write offset, unchanged when the text does not fit.
+ */
 static size_t put_string(uint8_t *out, size_t at, size_t capacity, const char *text)
 {
     size_t len = strlen(text);
@@ -81,6 +113,7 @@ static size_t put_string(uint8_t *out, size_t at, size_t capacity, const char *t
     return at + len;
 }
 
+/** @brief Build the INFO reply: name, version, build and chip UID. */
 static size_t handle_info(const factory_ops_t *ops, uint8_t *reply, size_t capacity)
 {
     size_t n = reply_status(FACTORY_CMD_INFO, FACTORY_OK, reply);
@@ -95,6 +128,7 @@ static size_t handle_info(const factory_ops_t *ops, uint8_t *reply, size_t capac
     return n;
 }
 
+/** @brief Handle READ: validate the range, copy from flash into the reply. */
 static size_t handle_read(const factory_ops_t *ops, const uint8_t *req,
                           size_t req_len, uint8_t *reply, size_t capacity)
 {
@@ -116,6 +150,7 @@ static size_t handle_read(const factory_ops_t *ops, const uint8_t *req,
     return 2U + length;
 }
 
+/** @brief Handle WRITE_BEGIN: validate the block and start a new session. */
 static size_t handle_write_begin(const uint8_t *req, size_t req_len, uint8_t *reply)
 {
     if (req_len < 11U) {
@@ -139,6 +174,7 @@ static size_t handle_write_begin(const uint8_t *req, size_t req_len, uint8_t *re
     return reply_status(FACTORY_CMD_WRITE_BEGIN, FACTORY_OK, reply);
 }
 
+/** @brief Handle WRITE_DATA: stage one chunk, in order and in range. */
 static size_t handle_write_data(const uint8_t *req, size_t req_len, uint8_t *reply)
 {
     if (req_len < 4U) {
@@ -160,6 +196,11 @@ static size_t handle_write_data(const uint8_t *req, size_t req_len, uint8_t *rep
     return reply_status(FACTORY_CMD_WRITE_DATA, FACTORY_OK, reply);
 }
 
+/**
+ * @brief Validate the staged file header, both CRCs and the UID binding.
+ * @param[in] ops Hardware hooks.
+ * @return FACTORY_OK or the FACTORY_ERR_* value to report.
+ */
 static uint8_t check_file(const factory_ops_t *ops)
 {
     const uint8_t *h = session.data;
@@ -193,6 +234,13 @@ static uint8_t check_file(const factory_ops_t *ops)
     return FACTORY_OK;
 }
 
+/**
+ * @brief Write the staged block, read it back and report its CRC.
+ * @param[in]  ops   Hardware hooks.
+ * @param[in]  cmd   Command being answered.
+ * @param[out] reply Reply buffer.
+ * @return Reply length.
+ */
 static size_t program_block(const factory_ops_t *ops, uint8_t cmd, uint8_t *reply)
 {
     static uint8_t block[FACTORY_BLOCK_SIZE];   /* too big for the task stack */
@@ -214,6 +262,7 @@ static size_t program_block(const factory_ops_t *ops, uint8_t cmd, uint8_t *repl
     return n + 4U;
 }
 
+/** @brief Handle WRITE_END: check the sequence, the CRCs, then program. */
 static size_t handle_write_end(const factory_ops_t *ops, uint8_t *reply)
 {
     if (!session.active || session.received != session.total) {
@@ -230,7 +279,11 @@ static size_t handle_write_end(const factory_ops_t *ops, uint8_t *reply)
     return program_block(ops, FACTORY_CMD_WRITE_END, reply);
 }
 
-/* A clean .diag: empty fault log, default log configuration. */
+/**
+ * @brief Format a clean .diag image into the staging buffer.
+ * @param[in] ops Hardware hooks, for crc32().
+ * @note A clean .diag is an empty fault log with the default log settings.
+ */
 static void build_clean_diag(const factory_ops_t *ops)
 {
     static const uint8_t log_cfg[] = {
@@ -251,6 +304,7 @@ static void build_clean_diag(const factory_ops_t *ops)
     session.total = (uint16_t)(FACTORY_FILE_HEADER_SIZE + sizeof(log_cfg));
 }
 
+/** @brief Handle DIAG_INIT: build a clean .diag image and program it. */
 static size_t handle_diag_init(const factory_ops_t *ops, const uint8_t *req,
                                size_t req_len, uint8_t *reply)
 {
@@ -272,6 +326,12 @@ static size_t handle_diag_init(const factory_ops_t *ops, const uint8_t *req,
  * SELFTEST: run the basic peripheral checks and report each one as
  * id u8, result u8, value u32.  The RAM test borrows the write staging
  * buffer, so it is refused while a write is in progress.
+ */
+/**
+ * @brief RAM test: fixed patterns, walking ones and an address pattern.
+ * @param[in,out] buf Buffer to clobber.
+ * @param[in]     len Length, bytes.
+ * @return true when every pattern read back unchanged.
  */
 static bool ram_walk(volatile uint8_t *buf, size_t len)
 {
@@ -309,6 +369,7 @@ static bool ram_walk(volatile uint8_t *buf, size_t len)
     return true;
 }
 
+/** @brief Append one SELFTEST result: id, result, value. */
 static size_t put_check(uint8_t *out, size_t at, uint8_t id, uint8_t result, uint32_t value)
 {
     out[at] = id;
@@ -317,6 +378,7 @@ static size_t put_check(uint8_t *out, size_t at, uint8_t id, uint8_t result, uin
     return at + 6U;
 }
 
+/** @brief Handle SELFTEST: run the checks and report each id/result/value. */
 static size_t handle_selftest(const factory_ops_t *ops, uint8_t *reply, size_t capacity)
 {
     static const uint8_t known[] = { '1', '2', '3', '4', '5', '6', '7', '8', '9' };

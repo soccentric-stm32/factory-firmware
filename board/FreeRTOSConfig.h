@@ -1,10 +1,11 @@
-/*
- * board/FreeRTOSConfig.h - project-owned FreeRTOS configuration
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * SRS:     DRT-001..DRT-004; FreeRTOS V10.2.0 as shipped in the image
- *          (same kernel and port as the validation firmware)
+/**
+ * @file    FreeRTOSConfig.h
+ * @brief   Project-owned FreeRTOS configuration.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6
+ * @srs     DRT-001..DRT-004; FreeRTOS V10.2.0 as shipped in the image (same
+ *          kernel and port as the validation firmware)
  */
 
 #ifndef FREERTOS_CONFIG_H
@@ -69,6 +70,10 @@
     (configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY << (8 - configPRIO_BITS))
 
 /* --- debug (DRT-002) ----------------------------------------------------- */
+/**
+ * @brief configASSERT handler, implemented in app/rtos_hooks.c.
+ * @note Saves an APP_FAULT_ASSERT fault record and resets.
+ */
 extern void app_fault_assert(const char *file, int line);
 #define configASSERT(x) do { if ((x) == 0) { app_fault_assert(__FILE__, __LINE__); } } while (0)
 

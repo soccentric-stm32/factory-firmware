@@ -1,15 +1,15 @@
-/*
- * button_task.c - user button B1 (PC13)
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  NUCLEO-F767ZI
- * SRS:     BTN-001..BTN-004
- *
- * B1 is high when pressed.  EXTI13 wakes the task on both edges; a 30 ms
- * software debounce filters the contact.  A short press (< 1 s) selects the
- * next pattern, a long press (>= 2 s) restores the defaults.  The LED task
- * owns the patterns; this task only reports the press through its queue.
+/**
+ * @file    button_task.c
+ * @brief   User button B1 (PC13).
+ * @details B1 is high when pressed.  EXTI13 wakes the task on both edges; a
+ *          30 ms software debounce filters the contact.  A short press
+ *          (< 1 s) selects the next pattern, a long press (>= 2 s) restores
+ *          the defaults.  The LED task owns the patterns; this task only
+ *          reports the press through its queue.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  NUCLEO-F767ZI
+ * @srs     BTN-001..BTN-004
  */
 
 #include "app_log.h"
@@ -22,21 +22,23 @@
 #include "led_task.h"
 #include "button_task.h"
 
-#define BUTTON_TASK_STACK_WORDS  384U   /* room for app_log() formatting */
-#define BUTTON_TASK_PRIORITY     (tskIDLE_PRIORITY + 3U)
-#define BUTTON_DEBOUNCE_MS       30U
-#define BUTTON_SHORT_MAX_MS      1000U
-#define BUTTON_LONG_MS           2000U
-#define BUTTON_CHECKIN_MS        500U
-#define BUTTON_POLL_MS           10U
+#define BUTTON_TASK_STACK_WORDS  384U   /**< Room for app_log() formatting. */
+#define BUTTON_TASK_PRIORITY     (tskIDLE_PRIORITY + 3U) /**< Task priority. */
+#define BUTTON_DEBOUNCE_MS       30U   /**< Contact debounce, ms. */
+#define BUTTON_SHORT_MAX_MS      1000U /**< Short press below this, ms. */
+#define BUTTON_LONG_MS           2000U /**< Long press from this, ms. */
+#define BUTTON_CHECKIN_MS        500U  /**< Health check-in period, ms. */
+#define BUTTON_POLL_MS           10U   /**< Wake-up when no edge arrives, ms. */
 
-static TaskHandle_t button_task_handle;
+static TaskHandle_t button_task_handle; /**< Set by button_task_create(). */
 
+/** @brief Read B1's level, true when pressed. */
 static bool button_raw(void)
 {
     return (GPIOC->IDR & APP_BTN1_PIN) != 0U;
 }
 
+/** @brief Configure PC13 as a pulled-down input and enable EXTI13 on both edges. */
 static void button_exti_init(void)
 {
     __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -59,6 +61,11 @@ static void button_exti_init(void)
     HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
+/**
+ * @brief EXTI15_10 handler for B1.
+ * @note Clears the pending bit and wakes the Button task; the press length is
+ *       measured in task context.
+ */
 void EXTI15_10_IRQHandler(void)
 {
     if ((EXTI->PR & (1UL << 13U)) != 0U) {
@@ -71,6 +78,10 @@ void EXTI15_10_IRQHandler(void)
     }
 }
 
+/**
+ * @brief Button task body: debounce B1 and report presses to the LED task.
+ * @param[in] arg Unused.
+ */
 static void button_task(void *arg)
 {
     (void)arg;

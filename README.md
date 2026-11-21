@@ -111,6 +111,7 @@ scripts/docker-dev.sh build   # build the stm32-dev container image once
 scripts/build.sh              # build inside the container
 make test                     # host tests of the command handler
 make lint                     # clang-tidy static analysis
+make docs                     # doxygen HTML of the sources and headers
 make help                     # all targets
 ```
 
@@ -153,6 +154,12 @@ See [tests/README.md](tests/README.md) for the test layout and the shared
 simulator library used by the factory station.
 
 ## Documentation
+
+Every hand-written source and header starts with a doxygen block (`@file`,
+`@brief`, `@author`, `@date`, `@target`, `@srs`), and every public function is
+documented once in its header. `make docs` renders them into
+`build/doxygen/html/`; `make docs-check` runs the same configuration with
+`WARN_AS_ERROR` and is part of CI.
 
 - [docs/FACTORY_SPEC.md](docs/FACTORY_SPEC.md) — wire protocol, file formats
   and flash layout shared with the factory station
