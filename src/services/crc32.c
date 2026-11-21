@@ -1,10 +1,13 @@
-/*
- * crc32.c - CRC-32/ISO-HDLC (the zlib polynomial)
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  STM32F767ZIT6
- * SRS:     HWLINK LNK-003/004, BOOT Appendix B
+/**
+ * @file    crc32.c
+ * @brief   CRC-32/ISO-HDLC (the zlib polynomial).
+ * @details Reflected bit-serial CRC with a 0xEDB88320 polynomial, so the
+ *          firmware needs no 1 KB table and matches the station and the
+ *          bootloader bit for bit.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6
+ * @srs     HWLINK LNK-003/004, BOOT Appendix B
  */
 
 #include "crc32.h"

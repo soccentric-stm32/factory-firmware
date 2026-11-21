@@ -22,6 +22,8 @@
 #   make lint           clang-tidy static analysis
 #   make lint-strict    clang-tidy, failing on any finding
 #   make format         clang-format the project sources and headers
+#   make docs           doxygen HTML of the hand-written sources
+#   make docs-check     same, but any doxygen warning fails it (CI)
 #   make test           host tests of the factory command handler (no board)
 #   make probe          detect the ST-LINK and the target chip
 #   make size           show the firmware size
@@ -90,8 +92,9 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: all build configure clean rebuild lint lint-strict format flash \
-        erase-all reset debug gdbserver serial probe size image test help
+.PHONY: all build configure clean rebuild lint lint-strict format docs \
+        docs-check flash erase-all reset debug gdbserver serial probe size \
+        image test help
 
 all: build
 
@@ -125,6 +128,15 @@ lint-strict:
 # Format only hand-written code; src/generated is owned by flatcc.
 format:
 	clang-format -i $$(find src board tests -name '*.c' -o -name '*.h' | grep -v '/generated/')
+
+# API documentation of the hand-written sources (docs/Doxyfile). Doxygen is a
+# developer tool, so it is not part of the container image.
+docs:
+	doxygen docs/Doxyfile
+
+# The same run with WARN_AS_ERROR, so a broken or missing doc block fails CI.
+docs-check:
+	{ cat docs/Doxyfile; echo "WARN_AS_ERROR = YES"; } | doxygen -
 
 # A-6: never program the raw ELF into a slot. BOOT only starts an image
 # that has its 256-byte header, metadata and records, which bootctl writes.

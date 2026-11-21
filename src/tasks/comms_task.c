@@ -1,17 +1,16 @@
-/*
- * comms_task.c - HWLINK Comms task
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  STM32F767ZIT6
- * SRS:     COM-001..COM-007, BTN-004, section 8
- *
- * One task parses COBS frames from the USART3 DMA ring, verifies every
- * FlatBuffer, executes the HWLINK and factory request set and sends the
- * reply.  Repeated request sequence numbers resend the previous response
- * without executing the request again (LNK-008).  All buffers are static;
- * flatcc uses the fixed arena in flatcc_port.c, so no task allocates after
- * start-up (DRT-004).
+/**
+ * @file    comms_task.c
+ * @brief   HWLINK Comms task.
+ * @details One task parses COBS frames from the USART3 DMA ring, verifies
+ *          every FlatBuffer, executes the HWLINK and factory request set and
+ *          sends the reply.  Repeated request sequence numbers resend the
+ *          previous response without executing the request again (LNK-008).
+ *          All buffers are static; flatcc uses the fixed arena in
+ *          flatcc_port.c, so no task allocates after start-up (DRT-004).
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6
+ * @srs     COM-001..COM-007, BTN-004, section 8
  */
 
 #include <string.h>
@@ -53,88 +52,106 @@
 #define APP_BUILD_DATE "unknown"
 #endif
 
-#define COMMS_TASK_STACK_WORDS   1536U
-#define COMMS_TASK_PRIORITY      (tskIDLE_PRIORITY + 4U)
-#define COMMS_EVENT_QUEUE_LEN    16U
-#define COMMS_LOOP_MS            10U
-#define COMMS_CHECKIN_MS         500U
-#define COMMS_TX_TIMEOUT_MS      200U
-#define COMMS_BAUD_REVERT_MS     5000U
-#define COMMS_MAX_TASK_STATS     12U
+#define COMMS_TASK_STACK_WORDS   1536U /**< Task stack, words. */
+#define COMMS_TASK_PRIORITY      (tskIDLE_PRIORITY + 4U) /**< Below Health. */
+#define COMMS_EVENT_QUEUE_LEN    16U   /**< Event queue length, entries. */
+#define COMMS_LOOP_MS            10U   /**< Wake-up when idle, ms. */
+#define COMMS_CHECKIN_MS         500U  /**< Health check-in period, ms. */
+#define COMMS_TX_TIMEOUT_MS      200U  /**< Per-frame TX timeout, ms. */
+#define COMMS_BAUD_REVERT_MS     5000U /**< COM-001 baud revert window, ms. */
+#define COMMS_MAX_TASK_STATS     12U   /**< Task rows in a Status reply. */
 
+/** @brief Events other tasks and the ISRs post to the Comms queue. */
 typedef enum {
-    COMMS_EVT_RX = 0,
-    COMMS_EVT_BUTTON
+    COMMS_EVT_RX = 0,  /**< Data or a receive event on USART3. */
+    COMMS_EVT_BUTTON   /**< Button press selected a new pattern. */
 } comms_event_type_t;
 
+/** @brief One queue event; only the fields of @ref type are used. */
 typedef struct {
-    uint8_t type;
-    uint8_t press;
-    uint8_t pattern;
-    uint16_t period;
+    uint8_t type;     /**< One of @ref comms_event_type_t. */
+    uint8_t press;    /**< 1 short, 2 long for COMMS_EVT_BUTTON. */
+    uint8_t pattern;  /**< APP_PATTERN_* the press selected. */
+    uint16_t period;  /**< Period of that pattern, ms. */
 } comms_event_t;
 
+/** @brief Local copy of the pattern the LED task is showing. */
 typedef struct {
-    uint8_t pattern;
-    uint16_t period;
+    uint8_t pattern;  /**< APP_PATTERN_*. */
+    uint16_t period;  /**< Period, ms. */
 } led_mirror_t;
 
-static QueueHandle_t comms_queue;
-static TaskHandle_t comms_task_handle;
+static QueueHandle_t comms_queue;      /**< Event queue. */
+static TaskHandle_t comms_task_handle; /**< Set by comms_task_create(). */
 
-static flatcc_builder_t builder;
+static flatcc_builder_t builder; /**< Shared builder; reset after every use. */
 
 /* Frame assembly.  rx_enc is the COBS body without its delimiter. */
-static uint8_t rx_enc[HWLINK_MAX_ENCODED];
-static size_t rx_enc_len;
-static bool rx_enc_overflow;
+static uint8_t rx_enc[HWLINK_MAX_ENCODED]; /**< COBS body, no delimiter. */
+static size_t rx_enc_len;                  /**< Bytes in rx_enc. */
+static bool rx_enc_overflow;               /**< true when a frame was too long. */
 
-static uint8_t rx_raw[HWLINK_MAX_FRAME];
-static uint8_t rx_payload[HWLINK_MAX_FRAME] __attribute__((aligned(8)));
-static uint8_t build_payload[HWLINK_MAX_FRAME] __attribute__((aligned(8)));
-static uint8_t raw_tx[HWLINK_MAX_FRAME];
+static uint8_t rx_raw[HWLINK_MAX_FRAME]; /**< Decoded frame. */
+static _Alignas(8) uint8_t rx_payload[HWLINK_MAX_FRAME]; /**< Verified request. */
+static _Alignas(8) uint8_t build_payload[HWLINK_MAX_FRAME]; /**< Message to send. */
+static uint8_t raw_tx[HWLINK_MAX_FRAME]; /**< Frame before COBS encoding. */
 
 /* The last reply, kept as an unencoded frame for LNK-008. */
-static uint8_t last_response[HWLINK_MAX_FRAME];
-static size_t last_response_len;
-static uint16_t last_request_seq;
-static bool last_request_valid;
+static uint8_t last_response[HWLINK_MAX_FRAME]; /**< Reply cached for replay. */
+static size_t last_response_len;                /**< Length of the cache. */
+static uint16_t last_request_seq;               /**< Sequence of that request. */
+static bool last_request_valid;                 /**< true when the cache is valid. */
 
+/** Encoded transmit frame in the non-cacheable DMA window. */
 static uint8_t tx_frame[HWLINK_MAX_ENCODED]
     __attribute__((section(".dma_buffer"), aligned(32)));
 
+/** Pattern the LED task is showing, reported in Status. */
 static led_mirror_t led_mirror[3] = {
     { APP_PATTERN_HEARTBEAT, APP_LED_DEFAULT_PERIOD },
     { APP_PATTERN_OFF,       APP_LED_DEFAULT_PERIOD },
     { APP_PATTERN_OFF,       APP_LED_DEFAULT_PERIOD }
 };
 
-static bool link_open;
-static bool baud_revert_pending;
-static uint32_t baud_last_valid;
+static bool link_open;          /**< true once the host sent Hello. */
+static bool baud_revert_pending;/**< COM-001 revert window is open. */
+static uint32_t baud_last_valid;/**< Tick of the last valid frame. */
 
+/** @brief Firmware name reported in HelloReply (APP_FIRMWARE_NAME). */
 static const char *firmware_name(void)
 {
     return APP_FIRMWARE_NAME;
 }
 
+/** @brief 64-bit device identity built from the first two UID words. */
 static uint64_t device_uid(void)
 {
     return ((uint64_t)HAL_GetUIDw0() << 32U) | (uint64_t)HAL_GetUIDw1();
 }
 
+/** @brief Flash bank mode from FLASH_OPTCR.nDBANK, for HelloReply. */
 static hwlink_FlashMode_enum_t flash_mode(void)
 {
     return (FLASH->OPTCR & FLASH_OPTCR_nDBANK) != 0U
            ? hwlink_FlashMode_SINGLE_BANK : hwlink_FlashMode_DUAL_BANK;
 }
 
+/** @brief Drop the partly assembled receive frame. */
 static void reset_parser(void)
 {
     rx_enc_len = 0U;
     rx_enc_overflow = false;
 }
 
+/**
+ * @brief Frame, encode and send one payload, optionally caching it for replay.
+ * @param[in] payload     Payload bytes.
+ * @param[in] payload_len Payload length, bytes.
+ * @param[in] flags       HWLINK_FLAG_* mask.
+ * @param[in] seq         Sequence number.
+ * @param[in] store       true caches the frame as last_response.
+ * @return true when the whole frame was sent in time.
+ */
 static bool send_payload(const uint8_t *payload, size_t payload_len,
                          uint8_t flags, uint16_t seq, bool store)
 {
@@ -165,6 +182,14 @@ static bool send_payload(const uint8_t *payload, size_t payload_len,
     return true;
 }
 
+/**
+ * @brief Serialise a Message body with flatcc and send it.
+ * @param[in] body  Body union of the reply.
+ * @param[in] seq   Sequence number.
+ * @param[in] flags HWLINK_FLAG_* mask.
+ * @param[in] store true caches the frame for LNK-008 replay.
+ * @return true when the frame was built and sent.
+ */
 static bool send_body(hwlink_Body_union_ref_t body, uint16_t seq,
                       uint8_t flags, bool store)
 {
@@ -185,6 +210,7 @@ static bool send_body(hwlink_Body_union_ref_t body, uint16_t seq,
     return send_payload(build_payload, size, flags, seq, store);
 }
 
+/** @brief Send the Ack reply for @p seq. */
 static bool send_ack(uint16_t seq)
 {
     flatcc_builder_reset(&builder);
@@ -193,6 +219,14 @@ static bool send_ack(uint16_t seq)
            send_body(hwlink_Body_as_Ack(ack), seq, HWLINK_FLAG_RESPONSE, true);
 }
 
+/**
+ * @brief Send a Nak reply.
+ * @param[in] seq             Sequence number being refused.
+ * @param[in] error           hwlink Error value.
+ * @param[in] detail          Short text detail, or NULL.
+ * @param[in] expected_offset Offset the host should resume at, or 0.
+ * @return true when the frame was built and sent.
+ */
 static bool send_nak(uint16_t seq, hwlink_Error_enum_t error,
                      const char *detail, uint32_t expected_offset)
 {
@@ -205,6 +239,7 @@ static bool send_nak(uint16_t seq, hwlink_Error_enum_t error,
            send_body(hwlink_Body_as_Nak(nak), seq, HWLINK_FLAG_RESPONSE, true);
 }
 
+/** @brief Send a Pong carrying the current HAL tick. */
 static bool send_pong(uint16_t seq)
 {
     flatcc_builder_reset(&builder);
@@ -214,6 +249,7 @@ static bool send_pong(uint16_t seq)
            send_body(hwlink_Body_as_Pong(pong), seq, HWLINK_FLAG_RESPONSE, true);
 }
 
+/** @brief Send HelloReply: role, firmware, UID, flash mode and identity. */
 static bool send_hello_reply(uint16_t seq)
 {
     flatcc_builder_reset(&builder);
@@ -242,6 +278,7 @@ static bool send_hello_reply(uint16_t seq)
                      HWLINK_FLAG_RESPONSE, true);
 }
 
+/** @brief Send the Status reply (uptime, errors, LEDs, tasks, identity). */
 static bool send_status(uint16_t seq)
 {
     TaskStatus_t task_status[COMMS_MAX_TASK_STATS];
@@ -338,6 +375,7 @@ static bool send_status(uint16_t seq)
                      HWLINK_FLAG_RESPONSE, true);
 }
 
+/** @brief Send a ButtonEvent so the station follows the selected pattern. */
 static bool send_button_event(uint8_t press, uint8_t pattern, uint16_t period)
 {
     flatcc_builder_reset(&builder);
@@ -349,17 +387,33 @@ static bool send_button_event(uint8_t press, uint8_t pattern, uint16_t period)
                      HWLINK_FLAG_EVENT, false);
 }
 
+/**
+ * @brief Check a requested period.
+ * @param[in] period Period, ms.
+ * @return true for APP_LED_MIN_PERIOD..APP_LED_MAX_PERIOD in 10 ms steps.
+ */
 static bool period_valid(uint16_t period)
 {
     return period >= APP_LED_MIN_PERIOD && period <= APP_LED_MAX_PERIOD &&
            (period % 10U) == 0U;
 }
 
+/**
+ * @brief Check a requested pattern id.
+ * @param[in] pattern APP_PATTERN_* value.
+ * @return true when it is below APP_PATTERN_COUNT.
+ */
 static bool pattern_valid(uint8_t pattern)
 {
     return pattern < APP_PATTERN_COUNT;
 }
 
+/**
+ * @brief Mirror an accepted SetLed in the local copy, including CHASE.
+ * @param[in] led     APP_LED_ID_1..APP_LED_ID_3.
+ * @param[in] pattern APP_PATTERN_*.
+ * @param[in] period  Period, ms.
+ */
 static void mirror_set(uint8_t led, uint8_t pattern, uint16_t period)
 {
     if (led == APP_LED_ID_1 || led == APP_LED_ID_2) {
@@ -383,6 +437,7 @@ static void mirror_set(uint8_t led, uint8_t pattern, uint16_t period)
     }
 }
 
+/** @brief Handle SetLed: validate, post to the LED task, Ack or Nak. */
 static void handle_set_led(const hwlink_SetLed_table_t set, uint16_t seq)
 {
     uint8_t led = (uint8_t)hwlink_SetLed_led(set);
@@ -408,6 +463,7 @@ static void handle_set_led(const hwlink_SetLed_table_t set, uint16_t seq)
     (void)send_ack(seq);
 }
 
+/** @brief Handle SetLedAll: validate, post to the LED task, Ack or Nak. */
 static void handle_set_led_all(const hwlink_SetLedAll_table_t set, uint16_t seq)
 {
     uint8_t pattern = (uint8_t)hwlink_SetLedAll_pattern(set);
@@ -432,9 +488,16 @@ static void handle_set_led_all(const hwlink_SetLedAll_table_t set, uint16_t seq)
     (void)send_ack(seq);
 }
 
+/** @brief Forward declaration; the body follows the raw-frame helpers. */
 static void handle_factory_fb(uint16_t seq, const uint8_t *payload,
                               size_t payload_len);
 
+/**
+ * @brief Verify and execute one HWLINK Message.
+ * @param[in] seq     Request sequence number.
+ * @param[in] payload FlatBuffer bytes.
+ * @param[in] len     Length, bytes.
+ */
 static void handle_payload(uint16_t seq, const uint8_t *payload, size_t len)
 {
     if (hwlink_Message_verify_as_root(payload, len) != flatcc_verify_ok) {
@@ -557,8 +620,15 @@ static void handle_payload(uint16_t seq, const uint8_t *payload, size_t len)
 #define FACTORY_LEGACY_RAW 1
 #endif
 
-static uint8_t factory_fb_reply[HWLINK_MAX_FRAME] __attribute__((aligned(8)));
+/** Reply buffer for the FACTORY FlatBuffers messages. */
+static _Alignas(8) uint8_t factory_fb_reply[HWLINK_MAX_FRAME];
 
+/**
+ * @brief Execute a FACTORY request and send the reply frame.
+ * @param[in] seq         Request sequence number.
+ * @param[in] payload     Message bytes.
+ * @param[in] payload_len Length, bytes.
+ */
 static void handle_factory_fb(uint16_t seq, const uint8_t *payload,
                               size_t payload_len)
 {
@@ -573,9 +643,16 @@ static void handle_factory_fb(uint16_t seq, const uint8_t *payload,
 }
 
 #if FACTORY_LEGACY_RAW
+/** @brief Reply buffer for the legacy proto 0x46 factory frames. */
 static uint8_t factory_reply[HWLINK_MAX_FRAME];
 
-/* Factory frames (proto 0x46) carry raw binary commands, not FlatBuffers. */
+/**
+ * @brief Execute a legacy factory frame (proto 0x46) and send the reply.
+ * @param[in] payload     Payload bytes.
+ * @param[in] payload_len Length, bytes.
+ * @param[in] seq         Request sequence number.
+ * @note Only built with FACTORY_LEGACY_RAW.
+ */
 static void handle_factory(const uint8_t *payload, size_t payload_len,
                            uint16_t seq)
 {
@@ -597,6 +674,13 @@ static void handle_factory(const uint8_t *payload, size_t payload_len,
 }
 #endif /* FACTORY_LEGACY_RAW */
 
+/**
+ * @brief Validate an unencoded frame and execute it.
+ * @param[in] raw     Frame bytes without COBS or the delimiter.
+ * @param[in] raw_len Frame length, bytes.
+ * @note Bad CRC frames are dropped silently (LNK-004); a repeated sequence
+ *       number replays the cached response (LNK-008).
+ */
 static void handle_raw(const uint8_t *raw, size_t raw_len)
 {
     size_t payload_len = 0U;
@@ -654,6 +738,10 @@ static void handle_raw(const uint8_t *raw, size_t raw_len)
     handle_payload(seq, rx_payload, payload_len);
 }
 
+/**
+ * @brief Feed one byte to the COBS frame assembler.
+ * @param[in] byte Received byte; 0 delimits a frame.
+ */
 static void feed_byte(uint8_t byte)
 {
     if (byte == 0U) {
@@ -672,6 +760,7 @@ static void feed_byte(uint8_t byte)
     }
 }
 
+/** @brief Drain the DMA ring into the frame assembler, in bounded batches. */
 static void poll_receive(void)
 {
     uint8_t chunk[64];
@@ -687,6 +776,7 @@ static void poll_receive(void)
     }
 }
 
+/** @brief Post a ButtonEvent from a Button task press. */
 static void handle_button_event(const comms_event_t *event)
 {
     if (event->press == 2U) {
@@ -707,6 +797,10 @@ static void handle_button_event(const comms_event_t *event)
     }
 }
 
+/**
+ * @brief Comms task body: serve the link, drain events, check in.
+ * @param[in] arg Unused.
+ */
 static void comms_task(void *arg)
 {
     (void)arg;

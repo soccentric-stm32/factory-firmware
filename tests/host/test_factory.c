@@ -1,8 +1,12 @@
-/*
- * test_factory.c - host tests for the factory command handler
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-09
+/**
+ * @file    test_factory.c
+ * @brief   Host tests for the factory command handler.
+ * @details Links the real factory_proto.c and factory_fb.c against the
+ *          simulated sector in factory_sim.c; no board is needed.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-09
+ * @target  host (x86-64)
+ * @srs     docs/FACTORY_SPEC.md section 5
  */
 
 #include <stdio.h>
@@ -15,10 +19,12 @@ void sim_fail_next_write(void);
 void sim_set_hardware(uint32_t, uint32_t, uint32_t, uint32_t);
 size_t sim_handle(const uint8_t *, size_t, uint8_t *, size_t);
 
-static int failures;
+static int failures; /**< Failed CHECK() count; main() returns it. */
+/** Report a failed condition and count it. */
 #define CHECK(cond) do { if (!(cond)) { \
     printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #cond); failures++; } } while (0)
 
+/** @brief Reference CRC-32/ISO-HDLC, independent of the firmware copy. */
 static uint32_t crc32_sw(const void *data, size_t len)
 {
     const uint8_t *p = data;
@@ -32,12 +38,22 @@ static uint32_t crc32_sw(const void *data, size_t len)
     return ~crc;
 }
 
+/** @brief Store a little-endian u32. */
 static void put32(uint8_t *p, uint32_t v)
 {
     p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
     p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
 }
 
+/**
+ * @brief Build a 32-byte file header plus payload for a WRITE test.
+ * @param[out] out     Destination, at least 32 + @p len bytes.
+ * @param[in]  magic   FACTORY_MAGIC_* value.
+ * @param[in]  payload Payload bytes.
+ * @param[in]  len     Payload length, bytes.
+ * @param[in]  uid     Chip UID to bind to, or NULL for unbound.
+ * @return Total file length, bytes.
+ */
 static size_t make_file(uint8_t *out, uint32_t magic, const uint8_t *payload,
                         size_t len, const uint8_t *uid)
 {
@@ -54,15 +70,28 @@ static size_t make_file(uint8_t *out, uint32_t magic, const uint8_t *payload,
     return 32 + len;
 }
 
-static uint8_t rpl[1024];
+static uint8_t rpl[1024]; /**< Reply of the last request. */
+/** @brief Forward declaration of the FlatBuffers vector test. */
 static void test_factory_flatbuffers(void);
 
+/**
+ * @brief Send one request and return its status byte.
+ * @return rpl[1], or 0xFF when no reply was built.
+ */
 static uint8_t send(const uint8_t *req, size_t len)
 {
     size_t n = sim_handle(req, len, rpl, sizeof(rpl));
     return n >= 2 ? rpl[1] : 0xFF;
 }
 
+/**
+ * @brief Run a full WRITE_BEGIN/DATA/END sequence for one file.
+ * @param[in] address      Block address.
+ * @param[in] file         File bytes.
+ * @param[in] total        File length, bytes.
+ * @param[in] declared_crc CRC-32 the request claims for the file.
+ * @return Status byte of the first request that failed, or of WRITE_END.
+ */
 static uint8_t write_file(uint32_t address, const uint8_t *file, size_t total,
                           uint32_t declared_crc)
 {
@@ -89,7 +118,10 @@ static uint8_t write_file(uint32_t address, const uint8_t *file, size_t total,
     return send(req, 1);
 }
 
-/* Result of check `id` in the last SELFTEST reply, or 0xFF when absent. */
+/**
+ * @brief Read the result of check @p id from the last SELFTEST reply.
+ * @return FACTORY_CHECK_* result, or 0xFF when the id is absent.
+ */
 static uint8_t check_result(uint8_t id)
 {
     for (size_t at = 3; at + 6 <= 3 + (size_t)rpl[2] * 6; at += 6) {
@@ -100,6 +132,7 @@ static uint8_t check_result(uint8_t id)
     return 0xFF;
 }
 
+/** @brief Run SELFTEST and the checks around it. */
 static void test_selftest(void)
 {
     uint8_t req[] = { FACTORY_CMD_SELFTEST };
@@ -248,6 +281,10 @@ static const uint8_t fb_selftest[] = {
     0x04,0x00,0x00,0x00
 };
 
+/**
+ * @brief Run the Python-generated FACTORY requests and check every reply is a
+ *        HWLK FlatBuffer.
+ */
 static void test_factory_flatbuffers(void)
 {
     static uint8_t reply[1024];

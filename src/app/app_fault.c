@@ -109,7 +109,6 @@ bool app_fault_is_previous_boot(void)
 
 /**
  * @brief Map a reason to its Status name.
- * @param[in] reason Fault reason.
  * @return Static name, or "unknown".
  */
 const char *app_fault_reason_text(app_fault_reason_t reason)
@@ -250,10 +249,6 @@ void app_fault_show_and_reset(void)
 
 /**
  * @brief Record a software fault without register state and reset.
- * @param[in] reason Fault reason.
- * @param[in] task   Task name, or NULL.
- * @param[in] file   Source path, or NULL.
- * @param[in] line   Source line.
  */
 void app_fault_fatal(app_fault_reason_t reason, const char *task,
                      const char *file, uint32_t line)
@@ -264,9 +259,8 @@ void app_fault_fatal(app_fault_reason_t reason, const char *task,
 
 /**
  * @brief Record an exception fault and reset.
- * @param[in] frame  Stacked exception frame (r0 from the naked handler).
- * @param[in] reason @ref app_fault_reason_t (r1 from the naked handler).
- * @note Fault context; never returns.
+ * @note Called by the naked handlers with the stacked frame in r0 and the
+ *       app_fault_reason_t in r1. Fault context; never returns.
  */
 __attribute__((used, noreturn))
 void app_fault_handler_c(uint32_t *frame, uint32_t reason)

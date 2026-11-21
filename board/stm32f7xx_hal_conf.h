@@ -1,10 +1,10 @@
-/*
- * board/stm32f7xx_hal_conf.h - project HAL configuration
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  STM32F767ZIT6, NUCLEO-F767ZI
- * SRS:     DCON-002 (drivers used as shipped; this is the project-owned
+/**
+ * @file    stm32f7xx_hal_conf.h
+ * @brief   Project HAL configuration.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6, NUCLEO-F767ZI
+ * @srs     DCON-002 (drivers used as shipped; this is the project-owned
  *          configuration file)
  */
 
@@ -51,6 +51,11 @@
 #include "stm32f7xx_hal_iwdg.h"
 
 #ifdef USE_FULL_ASSERT
+/**
+ * @brief HAL parameter-assert callback; only built with USE_FULL_ASSERT.
+ * @param[in] file Source path of the failed check.
+ * @param[in] line Source line of the failed check.
+ */
 void assert_failed(uint8_t *file, uint32_t line);
 #endif
 

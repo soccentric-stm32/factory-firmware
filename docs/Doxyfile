@@ -1,0 +1,42 @@
+# Doxyfile - API documentation of the factory firmware
+#
+# Doxygen is a developer tool, not part of the firmware build. It reads the
+# hand-written sources only (src/generated belongs to flatcc and third_party
+# is unmodified upstream code).
+#
+#   make docs         HTML into build/doxygen/html/
+#   make docs-check   the same run, but a warning fails the command (CI)
+#
+# Paths are relative to the repository root, so run it as `doxygen docs/Doxyfile`
+# from there (that is what the make targets do).
+#
+# Every file starts with a doxygen header that carries @file, @brief,
+# @author, @date, @target and @srs. The last two are project-specific, so they
+# are aliased below instead of being reported as unknown commands.
+
+PROJECT_NAME          = "factory-firmware"
+PROJECT_BRIEF         = "FreeRTOS factory application for the NUCLEO-F767ZI (STM32F767ZIT6)"
+OUTPUT_DIRECTORY      = build/doxygen
+INPUT                 = src board tests
+FILE_PATTERNS         = *.c *.h
+RECURSIVE             = YES
+EXCLUDE               = src/generated
+EXCLUDE_PATTERNS      = */generated/*
+EXTRACT_ALL           = NO
+EXTRACT_STATIC        = YES
+OPTIMIZE_OUTPUT_FOR_C = YES
+QUIET                 = YES
+
+# Function parameters are documented once, in the header; the .c files repeat
+# only the brief. A warning therefore means a real documentation error.
+WARN_IF_UNDOCUMENTED  = NO
+WARN_IF_DOC_ERROR     = YES
+WARN_NO_PARAMDOC      = NO
+WARN_AS_ERROR         = NO
+
+GENERATE_HTML         = YES
+GENERATE_LATEX        = NO
+GENERATE_XML          = NO
+HAVE_DOT              = NO
+
+ALIASES               = "target=@par Target:" "srs=@par SRS:"

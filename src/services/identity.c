@@ -1,16 +1,16 @@
-/*
- * identity.c - factory provisioning record reader (A-03)
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-04
- * Target:  STM32F767ZIT6
- * SRS:     identity contract PRV1, factory A-02/A-03/A-05/A-06
- *
- * The factory writes a PRV1 record into bank 2 sector 13 (0x08104000, or
- * 0x08004000 while bank 2 is swapped in).  This reader checks the header,
- * both CRC-32 values and the chip UID binding, then exposes the serial,
- * product, revision, profile and MAC.  A blank or torn record is reported as
- * absent; it is never treated as valid identity.
+/**
+ * @file    identity.c
+ * @brief   Factory provisioning record (PRV1) reader.
+ * @details The factory writes a PRV1 record into bank 2 sector 13 (0x08104000,
+ *          or 0x08004000 while bank 2 is swapped in).  This reader checks the
+ *          header, both CRC-32 values and the chip UID binding, then exposes
+ *          the serial, product, revision, profile and MAC.  A blank or torn
+ *          record is reported as absent; it is never treated as valid
+ *          identity.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-04
+ * @target  STM32F767ZIT6
+ * @srs     identity contract PRV1, factory A-02/A-03/A-05/A-06
  */
 
 #include <string.h>
@@ -35,35 +35,45 @@
 #define ID_IDENTITY_A         0x08104000UL
 #define ID_IDENTITY_SWAPPED   0x08004000UL
 
+/** PRV1 record header, 32 bytes.  The first 28 bytes carry the CRC. */
 typedef struct {
-    uint32_t magic;
-    uint16_t format;
-    uint16_t revision;
-    uint32_t length;
-    uint32_t tlv_crc32;
-    uint8_t uid[12];
-    uint32_t header_crc32;
+    uint32_t magic;       /**< ID_MAGIC, "PRV1". */
+    uint16_t format;      /**< ID_FORMAT. */
+    uint16_t revision;    /**< Record revision counter. */
+    uint32_t length;      /**< TLV length, bytes. */
+    uint32_t tlv_crc32;   /**< CRC-32 of the TLV block. */
+    uint8_t uid[12];      /**< 96-bit chip UID the record is bound to. */
+    uint32_t header_crc32;/**< CRC-32 of the previous 28 bytes. */
 } id_header_t;
 
+/** Decoded identity fields; empty when no valid record was found. */
 typedef struct {
-    bool valid;
-    uint16_t revision;
-    char serial[33];
-    char product[33];
-    char hw_revision[9];
-    char profile[65];
-    uint8_t mac[6];
-    bool mac_valid;
+    bool valid;             /**< true once parse_from() succeeded. */
+    uint16_t revision;      /**< Record revision counter. */
+    char serial[33];        /**< Serial number, NUL-terminated. */
+    char product[33];       /**< Product name, NUL-terminated. */
+    char hw_revision[9];    /**< Hardware revision, NUL-terminated. */
+    char profile[65];       /**< Calibration profile, NUL-terminated. */
+    uint8_t mac[6];         /**< Provisioned EUI-48. */
+    bool mac_valid;         /**< true when @ref mac was provisioned. */
 } app_identity_t;
 
-static app_identity_t identity;
-static bool refreshed;
+static app_identity_t identity; /**< Current identity, valid or empty. */
+static bool refreshed;          /**< true once a read was attempted. */
 
+/** @brief CRC-32 of the 28 bytes of header that precede the checksum. */
 static uint32_t header_crc(const uint8_t *raw)
 {
     return app_crc32(raw, 28U);
 }
 
+/**
+ * @brief Copy a TLV value into a NUL-terminated text field.
+ * @param[out] out    Destination field.
+ * @param[in]  cap    Capacity of @p out, bytes.
+ * @param[in]  data   TLV value, not NUL-terminated.
+ * @param[in]  length TLV value length, bytes.
+ */
 static void copy_text(char *out, size_t cap, const uint8_t *data, uint8_t length)
 {
     size_t n = length;
@@ -74,6 +84,12 @@ static void copy_text(char *out, size_t cap, const uint8_t *data, uint8_t length
     out[n] = '\0';
 }
 
+/**
+ * @brief Parse and validate the record at one sector address.
+ * @param[in] address Unswapped or swapped sector base.
+ * @return true when the header, both CRCs and the UID match and the record
+ *         carries at least a serial and a product.
+ */
 static bool parse_from(uint32_t address)
 {
     uint8_t raw[ID_HEADER_SIZE];
@@ -164,6 +180,10 @@ bool app_identity_refresh(void)
     return parse_from(ID_IDENTITY_SWAPPED);
 }
 
+/**
+ * @brief Read the record on first use.
+ * @return true when a valid record is loaded.
+ */
 static bool ensure_loaded(void)
 {
     if (!refreshed) {
@@ -211,6 +231,14 @@ bool app_identity_mac(uint8_t mac[6])
     return true;
 }
 
+/**
+ * @brief Append text to a bounded key=value string.
+ * @param[out] out  Destination buffer.
+ * @param[in]  cap  Capacity of @p out, bytes.
+ * @param[in]  pos  Current write offset.
+ * @param[in]  text Text to append; NULL is ignored.
+ * @return New write offset; @p out stays NUL-terminated.
+ */
 static size_t append_text(char *out, size_t cap, size_t pos, const char *text)
 {
     while (text != NULL && *text != '\0' && pos + 1U < cap) {
@@ -220,6 +248,14 @@ static size_t append_text(char *out, size_t cap, size_t pos, const char *text)
     return pos;
 }
 
+/**
+ * @brief Append an unsigned decimal number to a bounded string.
+ * @param[out] out   Destination buffer.
+ * @param[in]  cap   Capacity of @p out, bytes.
+ * @param[in]  pos   Current write offset.
+ * @param[in]  value Number to format.
+ * @return New write offset; @p out stays NUL-terminated.
+ */
 static size_t append_uint(char *out, size_t cap, size_t pos, unsigned value)
 {
     char digits[10];
@@ -235,6 +271,13 @@ static size_t append_uint(char *out, size_t cap, size_t pos, unsigned value)
     return pos;
 }
 
+/**
+ * @brief Append the provisioned MAC as AA:BB:CC:DD:EE:FF.
+ * @param[out] out Destination buffer.
+ * @param[in]  cap Capacity of @p out, bytes.
+ * @param[in]  pos Current write offset.
+ * @return New write offset; @p out stays NUL-terminated.
+ */
 static size_t append_mac(char *out, size_t cap, size_t pos)
 {
     static const char hex[] = "0123456789ABCDEF";

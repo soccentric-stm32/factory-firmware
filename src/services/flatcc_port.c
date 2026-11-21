@@ -1,14 +1,13 @@
-/*
- * flatcc_port.c - fixed-arena allocator for the flatcc runtime
- *
- * Author:  Sandesh Ghimire <sandesh@soccentric.com>
- * Date:    2026-11-03
- * Target:  STM32F767ZIT6
- * SRS:     DRT-004 (no allocation after start-up), DCON-002
- *
- * A small first-fit allocator with 16-byte blocks.  It is used only by the
- * Comms task (builder/verifier), so no lock is needed.  The arena is part of
- * .bss; malloc/free are never linked.
+/**
+ * @file    flatcc_port.c
+ * @brief   Fixed-arena allocator for the flatcc runtime.
+ * @details A small first-fit allocator with 16-byte blocks.  It is used only
+ *          by the Comms task (builder/verifier), so no lock is needed.  The
+ *          arena is part of .bss; malloc/free are never linked.
+ * @author  Sandesh Ghimire <sandesh@soccentric.com>
+ * @date    2026-11-03
+ * @target  STM32F767ZIT6
+ * @srs     DRT-004 (no allocation after start-up), DCON-002
  */
 
 #include <string.h>
@@ -20,27 +19,33 @@
 
 #define FLATCC_ALIGNMENT 16U
 
+/** @brief Header in front of every payload in the arena. */
 typedef struct flatcc_block {
-    size_t size;                 /* payload size */
-    struct flatcc_block *next;
-    uint32_t free;
-    uint32_t pad;
+    size_t size;                 /**< Payload size, 16-byte aligned. */
+    struct flatcc_block *next;   /**< Next block, NULL at the arena end. */
+    uint32_t free;               /**< 1 while the block is free. */
+    uint32_t pad;                /**< Keeps the payload 16-byte aligned. */
 } __attribute__((aligned(FLATCC_ALIGNMENT))) flatcc_block_t;
 
+/** Backing store for the arena, aligned like the blocks. */
 typedef union {
     long double align;
     void *pointer;
     unsigned char bytes[APP_FLATCC_HEAP_SIZE];
 } __attribute__((aligned(FLATCC_ALIGNMENT))) flatcc_arena_t;
 
-static flatcc_arena_t flatcc_arena;
-static flatcc_block_t *flatcc_head;
+static flatcc_arena_t flatcc_arena;      /**< Static arena, .bss. */
+static flatcc_block_t *flatcc_head;      /**< First block, NULL until used. */
 
+/**
+ * @brief Round a size up to the 16-byte block alignment.
+ */
 static size_t flatcc_align(size_t n)
 {
     return (n + (FLATCC_ALIGNMENT - 1U)) & ~(size_t)(FLATCC_ALIGNMENT - 1U);
 }
 
+/** @brief Create the single free block that spans the arena, once. */
 static void flatcc_heap_init(void)
 {
     if (flatcc_head == NULL) {

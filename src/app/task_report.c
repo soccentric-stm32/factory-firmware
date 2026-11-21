@@ -12,10 +12,6 @@
 
 /**
  * @brief Print the task's status line if a second has passed.
- * @param[in,out] state   Calling task's own report state.
- * @param[in]     number  Task number, 1 to 4.
- * @param[in]     name    Task name.
- * @param[in]     purpose One-sentence task purpose.
  */
 void task_report(task_report_t *state, unsigned number, const char *name, const char *purpose)
 {

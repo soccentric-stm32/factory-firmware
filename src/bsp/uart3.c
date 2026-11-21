@@ -150,7 +150,6 @@ bool app_uart3_init(void)
 
 /**
  * @brief Re-initialise USART3 at a supported rate.
- * @param[in] baud APP_UART_DEFAULT_BAUD or APP_UART_FAST_BAUD.
  * @return true on success; on failure the old rate is restored.
  */
 bool app_uart3_set_baud(uint32_t baud)
@@ -190,8 +189,6 @@ uint32_t app_uart3_baud(void)
 
 /**
  * @brief Copy new bytes out of the RX ring.
- * @param[out] dst     Destination buffer.
- * @param[in]  max_len Capacity of @p dst, bytes.
  * @return Bytes copied; 0 after an overrun resync.
  */
 uint32_t app_uart3_rx_read(uint8_t *dst, uint32_t max_len)
@@ -254,9 +251,6 @@ bool app_uart3_rx_restart(void)
 
 /**
  * @brief Send one frame by DMA and wait for the last stop bit.
- * @param[in] data       Frame bytes.
- * @param[in] len        Length, bytes; 0 sends nothing.
- * @param[in] timeout_ms DMA completion timeout, ms.
  * @return true when sent; false on HAL error or timeout.
  */
 bool app_uart3_send(const uint8_t *data, uint16_t len, uint32_t timeout_ms)

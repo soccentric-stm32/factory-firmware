@@ -14,7 +14,6 @@ volatile uint32_t app_error_flags; /**< Latched APP_ERROR_* bits. */
 
 /**
  * @brief Set bits in the latch with interrupts masked.
- * @param[in] flags APP_ERROR_* mask to OR in.
  */
 void app_error_set(uint32_t flags)
 {
